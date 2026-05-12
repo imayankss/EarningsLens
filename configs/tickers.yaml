@@ -1,0 +1,65 @@
+# =============================================================
+# configs/tickers.yaml
+# MVP ticker basket — 20 S&P 500 stocks across 6 sectors.
+# Chosen for: coverage, liquidity, earnings call availability.
+# =============================================================
+
+technology:
+  - AAPL    # Apple
+  - MSFT    # Microsoft
+  - GOOGL   # Alphabet
+  - META    # Meta
+  - NVDA    # NVIDIA
+  - AMZN    # Amazon
+
+financials:
+  - JPM     # JPMorgan Chase
+  - BAC     # Bank of America
+  - GS      # Goldman Sachs
+  - MS      # Morgan Stanley
+
+healthcare:
+  - JNJ     # Johnson & Johnson
+  - PFE     # Pfizer
+  - UNH     # UnitedHealth
+
+consumer_discretionary:
+  - TSLA    # Tesla
+  - WMT     # Walmart
+  - HD      # Home Depot
+
+energy:
+  - XOM     # ExxonMobil
+  - CVX     # Chevron
+
+industrials:
+  - BA      # Boeing
+  - CAT     # Caterpillar
+
+# Flat list used by ingestion scripts
+all_tickers:
+  - AAPL
+  - MSFT
+  - GOOGL
+  - META
+  - NVDA
+  - AMZN
+  - JPM
+  - BAC
+  - GS
+  - MS
+  - JNJ
+  - PFE
+  - UNH
+  - TSLA
+  - WMT
+  - HD
+  - XOM
+  - CVX
+  - BA
+  - CAT
+
+# Historical analysis window
+date_range:
+  start: "2019-01-01"
+  end: "2024-12-31"

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "earnings-call-sentiment-analyzer"
+version = "0.1.0"
+description = "Financial NLP and earnings call sentiment analysis"
+authors = [
+    {name = "Mayank Suryavanshi"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

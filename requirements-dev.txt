@@ -1,0 +1,27 @@
+# =============================================================
+# Development & Testing Dependencies
+# Install: pip install -r requirements-dev.txt
+# (Includes all of requirements.txt automatically)
+# =============================================================
+-r requirements.txt
+
+# --- Testing ---
+pytest>=8.2.0
+pytest-cov>=5.0.0
+pytest-mock>=3.14.0
+
+# --- Code Quality ---
+black>=24.4.0
+isort>=5.13.0
+flake8>=7.0.0
+ruff>=0.4.0
+mypy>=1.10.0
+
+# --- Notebooks ---
+jupyter>=1.0.0
+ipykernel>=6.29.0
+nbformat>=5.10.0
+
+# --- Dev Utilities ---
+pre-commit>=3.7.0
+ipython>=8.24.0

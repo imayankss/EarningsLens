@@ -1,0 +1,74 @@
+# =============================================================
+# Earnings Call Sentiment Analyzer — .gitignore
+# =============================================================
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.so
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Data — never commit raw/interim/processed data
+data/raw/*
+data/interim/*
+data/processed/*
+models/*
+
+# But keep the directory markers
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!data/dictionaries/loughran_mcdonald/.gitkeep
+!models/.gitkeep
+!logs/.gitkeep
+
+# Logs
+logs/*
+!logs/.gitkeep
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# macOS
+.DS_Store
+**/.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# HuggingFace cache
+.cache/
+~/.cache/huggingface/
+
+# Streamlit
+.streamlit/
+
+# Reports (keep structure, ignore outputs)
+reports/figures/*
+reports/tables/*
+!reports/figures/.gitkeep
+!reports/tables/.gitkeep

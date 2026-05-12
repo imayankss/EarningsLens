@@ -1,0 +1,74 @@
+# =============================================================
+# configs/config.yaml
+# Master configuration — single source of truth for all pipeline
+# parameters. Edit this file; never hardcode values in src/.
+# =============================================================
+
+project:
+  name: "earnings-call-sentiment-analyzer"
+  version: "0.1.0"
+  log_level: "INFO"
+
+# ── Paths ──────────────────────────────────────────────────────
+paths:
+  raw_transcripts:   "data/raw/transcripts"
+  raw_market:        "data/raw/market"
+  raw_sec:           "data/raw/sec"
+  interim_chunks:    "data/interim/chunks"
+  interim_transcripts: "data/interim/transcripts"
+  processed_sentiment: "data/processed/sentiment"
+  processed_market:  "data/processed/market"
+  processed_event:   "data/processed/event_study"
+  lm_dictionary:     "data/dictionaries/loughran_mcdonald/LM_MasterDictionary.csv"
+  db:                "data/earnings_analytics.duckdb"
+  models:            "models"
+  reports:           "reports"
+  logs:              "logs"
+
+# ── FinBERT ────────────────────────────────────────────────────
+finbert:
+  model_name: "ProsusAI/finbert"
+  max_length: 512
+  chunk_size: 400        # tokens per chunk (fits in 512 with special tokens)
+  chunk_overlap: 50      # overlapping tokens between adjacent chunks
+  batch_size: 16         # reduce to 8 if MPS memory errors appear
+  device: "mps"          # Apple Silicon GPU | "cpu" fallback
+
+# ── Loughran-McDonald Baseline ─────────────────────────────────
+lm_baseline:
+  # Download from: https://sraf.nd.edu/loughranmcdonald-master-dictionary/
+  # Save as: data/dictionaries/loughran_mcdonald/LM_MasterDictionary.csv
+  positive_col: "Positive"
+  negative_col: "Negative"
+  word_col: "Word"
+
+# ── Market Data ────────────────────────────────────────────────
+market:
+  provider: "yfinance"
+  benchmark_ticker: "^GSPC"    # S&P 500 as market return benchmark
+  risk_free_rate: 0.05         # annualised — update quarterly
+  data_frequency: "1d"
+
+# ── Event Study ────────────────────────────────────────────────
+event_study:
+  windows: [1, 2, 3, 5, 10]   # trading-day forward return windows
+  estimation_window: 120        # days for market-model beta estimation
+  gap_days: 10                  # gap between estimation window and event
+  significance_level: 0.05
+  # Timing convention:
+  #   after_market  → event_date = earnings_date + 1 trading day
+  #   pre_market    → event_date = earnings_date (same day)
+  default_timing: "after_market"
+
+# ── Storage ────────────────────────────────────────────────────
+storage:
+  format: "parquet"
+  compression: "snappy"
+
+# ── Preprocessing ──────────────────────────────────────────────
+preprocessing:
+  min_chunk_tokens: 50
+  max_chunk_tokens: 450
+  remove_boilerplate: true
+  separate_qa: true
+  speaker_normalization: true
