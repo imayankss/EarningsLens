@@ -1,0 +1,1030 @@
+"""
+src/preprocessing/transcript_segmenter.py
+==========================================
+Production-grade earnings call transcript segmentation pipeline.
+
+Implements multi-pass parsing:
+    Pass 1 — Section boundary detection (prepared_remarks vs qa)
+    Pass 2 — Structured speaker header detection
+    Pass 3 — Fallback multiline header detection
+    Pass 4 — Heuristic recovery for malformed / OCR-damaged segments
+
+Output: List[Segment] with full schema per segment including
+speaker role, type, QA linkage prep, and parsing confidence.
+
+Compatible with:
+    - FinBERT chunking (token_estimate pre-computed)
+    - Speaker-level sentiment analysis
+    - QA pair linkage (qa_pair_id scaffolding)
+    - Event study pipelines
+    - RAG retrieval systems
+"""
+from __future__ import annotations
+
+import hashlib
+from pydoc import text
+import re
+import unicodedata
+from dataclasses import dataclass, field, asdict
+from enum import Enum
+from pathlib import Path
+from typing import Optional
+
+import pandas as pd
+
+from src.utils.logger import get_logger
+
+log = get_logger(__name__)
+
+
+# ===========================================================================
+# Enums
+# ===========================================================================
+
+class SectionType(str, Enum):
+    PREPARED_REMARKS = "prepared_remarks"
+    QA               = "qa"
+    OPERATOR         = "operator"
+    UNKNOWN          = "unknown"
+
+
+class SpeakerType(str, Enum):
+    EXECUTIVE = "executive"
+    ANALYST   = "analyst"
+    OPERATOR  = "operator"
+    UNKNOWN   = "unknown"
+
+
+class SpeakerRole(str, Enum):
+    CEO      = "CEO"
+    CFO      = "CFO"
+    COO      = "COO"
+    PRESIDENT= "President"
+    ANALYST  = "Analyst"
+    OPERATOR = "Operator"
+    IR       = "IR"
+    UNKNOWN  = "Unknown"
+
+
+# ===========================================================================
+# Constants and compiled patterns
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Noise / boilerplate to strip before parsing
+# ---------------------------------------------------------------------------
+_SAFE_HARBOR_PATTERN = re.compile(
+    r"(?is)(?:safe\s+harbor|forward.looking\s+statements?)"
+    r".{0,800}?"
+    r"(?:actual\s+results|differ\s+materially|uncertainties)[^.]*\.",
+    re.DOTALL,
+)
+
+_COPYRIGHT_PATTERN = re.compile(
+    r"(?i)(?:copyright|©|\(c\))\s*\d{4}.{0,120}?(?:\n|$)",
+)
+
+_FOOTER_NOISE = re.compile(
+    r"(?i)(?:this\s+transcript\s+(?:is|was)\s+produced|"
+    r"refinitiv|seeking\s+alpha|motley\s+fool|"
+    r"s&p\s+global|factset|bloomberg\s+transcript)[^\n]*\n?",
+)
+
+# ---------------------------------------------------------------------------
+# Section boundary detection (Pass 1)
+# ---------------------------------------------------------------------------
+_QA_BOUNDARY_PATTERNS: list[re.Pattern] = [
+    re.compile(r"(?im)^\s*question(?:\s*-\s*and\s*-\s*|\s+and\s+)answer(?:s)?\s+session\s*$"),
+    re.compile(r"(?im)^\s*questions?\s+and\s+answers?\s*$"),
+    re.compile(r"(?i)we\s+will\s+now\s+begin\s+the\s+question(?:-and-answer)?\s+session"),
+    re.compile(r"(?i)(?:now\s+)?open(?:ing)?\s+(?:the\s+)?(?:floor|lines?)\s+for\s+questions?"),
+    re.compile(r"(?i)(?:our\s+)?first\s+question\s+(?:comes?\s+from|is\s+from)"),
+    re.compile(r"(?i)(?:now\s+)?begin(?:ning)?\s+(?:the\s+)?q(?:&|\s+and\s+)a"),
+    re.compile(r"(?i)at\s+this\s+time[,\s]+(?:i['\u2019]d\s+like\s+to\s+)?(?:open|turn).*?(?:questions?|q&a)"),
+    re.compile(r"(?im)^\s*\[?\s*q\s*(?:&|and)\s*a\s*(?:session)?\s*\]?\s*$"),
+]
+
+# ---------------------------------------------------------------------------
+# Speaker header detection (Pass 2 — structured headers)
+# ---------------------------------------------------------------------------
+
+# Pattern: "John Smith - Chief Executive Officer" or "John Smith – CEO"
+_STRUCTURED_HEADER = re.compile(
+    r"^(?P<name>[A-Z][A-Za-z\u2019'\-\.]+(?:\s+[A-Z][A-Za-z\u2019'\-\.]+){0,4})"
+    r"\s*[-\u2013\u2014:]\s*"
+    r"(?P<title>[A-Za-z][^\n]{2,80})"
+    r"\s*$",
+    re.MULTILINE,
+)
+
+# Pattern: "Operator" standalone line
+_OPERATOR_HEADER = re.compile(
+    r"(?im)^\s*operator\s*(?::|$)",
+)
+
+# Pattern: "Operator: text continues inline"
+_OPERATOR_INLINE = re.compile(
+    r"(?im)^(?P<header>operator\s*:)\s*(?P<text>.+)$",
+)
+
+# Pattern: ALL CAPS name line (common in some providers)
+_ALL_CAPS_HEADER = re.compile(
+    r"(?m)^(?P<name>[A-Z][A-Z\s\-\.]{3,50})$",
+)
+
+# ---------------------------------------------------------------------------
+# Pass 3 — multiline header (name on one line, title on next)
+# ---------------------------------------------------------------------------
+_MULTILINE_HEADER = re.compile(
+    r"(?m)^(?P<name>[A-Z][A-Za-z\-\.]+(?:\s+[A-Za-z\-\.]+){0,4})\n"
+    r"(?P<title>(?:Chief|Senior|Executive|Managing|Vice|President|"
+    r"Analyst|Director|Head|Partner|Officer)[A-Za-z\s,\.&/]{2,80})$",
+)
+
+# ---------------------------------------------------------------------------
+# Role keyword maps (checked in order — most specific first)
+# ---------------------------------------------------------------------------
+_ROLE_PATTERNS: list[tuple[re.Pattern, SpeakerRole, SpeakerType]] = [
+    (re.compile(r"(?i)\bchief\s+executive|ceo\b"),              SpeakerRole.CEO,      SpeakerType.EXECUTIVE),
+    (re.compile(r"(?i)\bchief\s+financial|cfo\b"),              SpeakerRole.CFO,      SpeakerType.EXECUTIVE),
+    (re.compile(r"(?i)\bchief\s+operating|coo\b"),              SpeakerRole.COO,      SpeakerType.EXECUTIVE),
+    (re.compile(r"(?i)\bpresident\b"),                           SpeakerRole.PRESIDENT,SpeakerType.EXECUTIVE),
+    (re.compile(r"(?i)\binvestor\s+relations?\b"),               SpeakerRole.IR,       SpeakerType.EXECUTIVE),
+    (re.compile(r"(?i)\boperator\b"),                            SpeakerRole.OPERATOR, SpeakerType.OPERATOR),
+    (re.compile(r"(?i)\banalyst\b"),                             SpeakerRole.ANALYST,  SpeakerType.ANALYST),
+]
+
+# Known analyst firm name fragments — heuristic for unroled speakers in QA
+_ANALYST_FIRM_KEYWORDS = re.compile(
+    r"(?i)(?:morgan\s+stanley|goldman\s+sachs|jp\s*morgan|"
+    r"bank\s+of\s+america|merrill|barclays|citi(?:group)?|"
+    r"wells\s+fargo|ubs|deutsche|credit\s+suisse|rbc|"
+    r"jefferies|piper\s+sandler|raymond\s+james|cowen|"
+    r"evercore|lazard|guggenheim|bernstein|needham|"
+    r"oppenheimer|stifel|baird|cantor|mizuho|bmo|"
+    r"truist|keybanc|william\s+blair)",
+)
+
+# Question detection heuristics
+_QUESTION_INDICATORS = re.compile(
+    r"(?i)(?:\?\s*$|"
+    r"\b(?:could\s+you|can\s+you|would\s+you|"
+    r"what\s+is|what\s+are|how\s+(?:do|does|did|should|would)|"
+    r"why\s+(?:did|do|does|is|are)|"
+    r"when\s+(?:do|did|will|would)|"
+    r"i['\u2019]?(?:d\s+like\s+to\s+ask|was\s+wondering)|"
+    r"my\s+question\s+is|"
+    r"can\s+you\s+(?:elaborate|provide|give|walk|help|talk))\b)",
+)
+
+# Segment length sanity bounds
+MIN_SEGMENT_WORDS  = 3
+MAX_SEGMENT_WORDS  = 8_000
+AVG_CHARS_PER_TOKEN = 4   # rough estimate for token_estimate without tokenizer
+
+
+# ===========================================================================
+# Segment dataclass
+# ===========================================================================
+
+@dataclass
+class Segment:
+    """
+    One speaker turn within an earnings call transcript.
+
+    Fields are aligned with the full pipeline output schema.
+    Never mutate after construction — treat as immutable record.
+    """
+    segment_id        : str
+    transcript_id     : str
+    order_index       : int
+    section_type      : str            # SectionType value
+    speaker           : str            # raw parsed name
+    speaker_clean     : str            # normalised lowercase name
+    speaker_role      : str            # SpeakerRole value
+    speaker_type      : str            # SpeakerType value
+    text              : str
+    word_count        : int
+    char_count        : int
+    token_estimate    : int            # chars / AVG_CHARS_PER_TOKEN
+    is_question       : bool
+    is_answer         : bool
+    qa_pair_id        : Optional[str]  # populated by QA linker (downstream)
+    parsing_confidence: float          # 0.0 – 1.0
+    raw_header        : str            # verbatim speaker line from source
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def _make_segment_id(transcript_id: str, order_index: int) -> str:
+    """Deterministic segment ID: TRANSCRIPTID_seg_NNNN."""
+    return f"{transcript_id}_seg_{order_index:04d}"
+
+
+def _token_estimate(text: str) -> int:
+    return max(1, len(text) // AVG_CHARS_PER_TOKEN)
+
+
+def _is_question(text: str) -> bool:
+    return bool(_QUESTION_INDICATORS.search(text[:800]))
+
+
+# ===========================================================================
+# TranscriptSegmenter
+# ===========================================================================
+
+class TranscriptSegmenter:
+    """
+    Multi-pass earnings call transcript segmentation engine.
+
+    Parsing pipeline:
+        1. normalize_transcript()   — clean noise without altering content
+        2. detect_sections()        — locate prepared_remarks / qa boundary
+        3. detect_speaker_blocks()  — extract raw (header, text) pairs per section
+        4. classify_speaker_role()  — assign role + type from title + context
+        5. extract_segments()       — build Segment objects with full schema
+        6. validate_segments()      — enforce ordering, length, and structural rules
+
+    Entry point:
+        segments: list[Segment] = segmenter.segment_transcript(raw_text, transcript_id)
+
+    Example:
+        segmenter = TranscriptSegmenter()
+        segments  = segmenter.segment_transcript(raw_text, "AAPL_20240201")
+        df        = segmenter.to_dataframe(segments)
+    """
+
+    def __init__(
+        self,
+        min_segment_words : int  = MIN_SEGMENT_WORDS,
+        max_segment_words : int  = MAX_SEGMENT_WORDS,
+        merge_adjacent    : bool = True,
+    ) -> None:
+        """
+        Args:
+            min_segment_words: Segments below this word count are flagged / dropped
+            max_segment_words: Segments above this word count trigger a warning
+            merge_adjacent   : Merge consecutive turns from the same speaker
+        """
+        self.min_segment_words = min_segment_words
+        self.max_segment_words = max_segment_words
+        self.merge_adjacent    = merge_adjacent
+
+    # =========================================================================
+    # Public entry point
+    # =========================================================================
+
+    def segment_transcript(
+        self,
+        raw_text     : str,
+        transcript_id: str,
+    ) -> list[Segment]:
+        """
+        Full segmentation pipeline for one transcript.
+
+        Args:
+            raw_text     : Raw transcript string (uncleaned)
+            transcript_id: Unique identifier e.g. "AAPL_20240201"
+
+        Returns:
+            Ordered list of Segment objects.
+            Empty list if transcript is unparseable.
+        """
+        if not raw_text or not raw_text.strip():
+            log.warning(f"{transcript_id}: empty transcript received")
+            return []
+
+        # Pass 1 — normalise
+        text = self.normalize_transcript(raw_text)
+
+        # Pass 2 — section split
+        sections = self.detect_sections(text)
+
+        # Pass 3+4 — speaker block detection per section
+        raw_blocks = self.detect_speaker_blocks(sections)
+
+        # Build segments
+        segments = self.extract_segments(raw_blocks, transcript_id)
+
+        # Optional: merge adjacent same-speaker segments
+        if self.merge_adjacent:
+            segments = self._merge_adjacent_segments(segments)
+
+        # Validate
+        segments, issues = self.validate_segments(segments)
+
+        if issues:
+            for issue in issues:
+                log.warning(f"{transcript_id}: {issue}")
+
+        log.info(
+            f"{transcript_id}: {len(segments)} segments — "
+            f"{sum(1 for s in segments if s.section_type == SectionType.PREPARED_REMARKS.value)} prepared, "
+            f"{sum(1 for s in segments if s.section_type == SectionType.QA.value)} QA, "
+            f"{sum(1 for s in segments if s.section_type == SectionType.OPERATOR.value)} operator"
+        )
+        return segments
+
+    # =========================================================================
+    # Stage 1 — Normalisation
+    # =========================================================================
+
+    def normalize_transcript(self, text: str) -> str:
+        """
+        Clean noise from raw transcript without altering speaker content.
+
+        Operations (order matters):
+            1. Unicode dash / quote normalisation
+            2. Safe-harbour disclaimer removal
+            3. Copyright / footer noise removal
+            4. OCR whitespace artefact correction
+            5. Duplicate blank line collapse
+            6. Strip leading/trailing whitespace
+
+        Args:
+            text: Raw transcript string
+
+        Returns:
+            Normalised string ready for section and speaker detection
+        """
+        # 1. Unicode normalisation
+        text = unicodedata.normalize("NFKD", text)
+
+        # Normalise dash variants to ASCII hyphen
+        text = text.replace("\u2013", "-").replace("\u2014", "-").replace("\u2012", "-")
+
+        # Normalise smart quotes
+        text = text.replace("\u2018", "'").replace("\u2019", "'")
+        text = text.replace("\u201c", '"').replace("\u201d", '"')
+
+        # Non-breaking space → regular space
+        text = text.replace("\u00a0", " ")
+
+        # 2. Remove safe-harbour disclaimers (multi-line, greedy-bounded)
+        text = _SAFE_HARBOR_PATTERN.sub("", text)
+
+        # 3. Remove copyright lines and transcript-provider footers
+        text = _COPYRIGHT_PATTERN.sub("", text)
+        text = _FOOTER_NOISE.sub("", text)
+
+        # 4. OCR artefacts — collapsed words with no space
+        #    e.g. "RevenueincreasedinQ3" — heuristic: insert space before capitals
+        #    Only applied when two+ consecutive lowercase→uppercase transitions exist
+        text = re.sub(r"([a-z])([A-Z]{1}[a-z])", r"\1 \2", text)
+
+        # 5. Malformed spacing — tabs to spaces, carriage returns
+        text = text.replace("\t", " ").replace("\r\n", "\n").replace("\r", "\n")
+
+        # 6. Collapse runs of spaces (but preserve newlines)
+        text = re.sub(r"[ ]{2,}", " ", text)
+
+        # 7. Collapse runs of blank lines (max 2 consecutive)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+
+        return text.strip()
+
+    # =========================================================================
+    # Stage 2 — Section detection
+    # =========================================================================
+
+    def detect_sections(self, text: str) -> dict[str, str]:
+        """
+        Split normalised transcript into prepared_remarks and qa sections.
+
+        Uses multi-pattern QA boundary detection. The earliest matching
+        boundary position wins to avoid missing the transition point.
+
+        Args:
+            text: Normalised transcript text
+
+        Returns:
+            {
+              "prepared_remarks": str,
+              "qa"              : str,
+              "full"            : str,
+            }
+        """
+        boundary_idx = len(text)   # default: entire text is prepared_remarks
+
+        for pattern in _QA_BOUNDARY_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                boundary_idx = min(boundary_idx, match.end())
+
+        if boundary_idx == len(text):
+            log.debug("No Q&A boundary detected — treating full text as prepared_remarks")
+
+        return {
+            "prepared_remarks": text[:boundary_idx].strip(),
+            "qa"              : text[boundary_idx:].strip(),
+            "full"            : text,
+        }
+
+    # =========================================================================
+    # Stage 3 — Speaker block detection (multi-pass)
+    # =========================================================================
+
+    def detect_speaker_blocks(
+        self,
+        sections: dict[str, str],
+    ) -> list[dict]:
+        """
+        Extract raw (header, text, section_type) blocks from both sections.
+
+        Each section is parsed independently using the multi-pass strategy:
+            Pass 2: structured headers  (NAME - TITLE)
+            Pass 3: multiline headers   (NAME \\n TITLE)
+            Pass 4: heuristic recovery  (ALL CAPS, standalone names)
+
+        Args:
+            sections: Output of detect_sections()
+
+        Returns:
+            List of raw block dicts:
+                {
+                  "raw_header"  : str,
+                  "text"        : str,
+                  "section_type": str,
+                }
+        """
+        blocks: list[dict] = []
+
+        for section_name, section_text in [
+            (SectionType.PREPARED_REMARKS.value, sections["prepared_remarks"]),
+            (SectionType.QA.value,               sections["qa"]),
+        ]:
+            if not section_text.strip():
+                continue
+            section_blocks = self._parse_section(section_text, section_name)
+            blocks.extend(section_blocks)
+
+        return blocks
+
+    def _parse_section(
+        self,
+        text        : str,
+        section_type: str,
+    ) -> list[dict]:
+        """
+        Multi-pass speaker block parser for a single section.
+
+        Returns list of raw block dicts with raw_header, text, section_type.
+        """
+        # Try Pass 2: structured headers
+        blocks = self._pass2_structured(text, section_type)
+        if blocks:
+            return blocks
+
+        # Try Pass 3: multiline headers
+        blocks = self._pass3_multiline(text, section_type)
+        if blocks:
+            return blocks
+
+        # Pass 4: heuristic recovery
+        blocks = self._pass4_heuristic(text, section_type)
+        return blocks
+
+    def _pass2_structured(
+        self,
+        text        : str,
+        section_type: str,
+    ) -> list[dict]:
+        """
+        Pass 2: detect 'NAME - TITLE' and 'Operator:' structured headers.
+        Returns blocks if at least one structured header found, else [].
+        """
+        # Build a combined pattern that finds either structured or operator headers
+        structured_matches = list(_STRUCTURED_HEADER.finditer(text))
+        operator_matches = list(_OPERATOR_HEADER.finditer(text))
+
+        splits = sorted(
+        structured_matches + operator_matches,
+        key=lambda m: m.start()
+        )
+
+        if not splits:
+            return []
+
+        blocks: list[dict] = []
+
+        # Text before first header → prepend as unknown block if non-trivial
+        preamble = text[:splits[0].start()].strip()
+        if len(preamble.split()) >= self.min_segment_words:
+            blocks.append({
+                "raw_header"  : "",
+                "text"        : preamble,
+                "section_type": section_type,
+            })
+
+        for i, match in enumerate(splits):
+            header = (
+                match.groupdict().get("structured")
+                or match.groupdict().get("operator")
+                or match.group(0)
+            ).strip()
+            start     = match.end()
+            end       = splits[i + 1].start() if i + 1 < len(splits) else len(text)
+            body      = text[start:end].strip()
+
+            # Handle inline operator: "Operator: text continues on same line"
+            inline_op = _OPERATOR_INLINE.match(header + " " + body[:80])
+            if inline_op and not body:
+                body = inline_op.group("text").strip()
+
+            blocks.append({
+                "raw_header"  : header,
+                "text"        : body,
+                "section_type": section_type,
+            })
+
+        return blocks
+
+    def _pass3_multiline(
+        self,
+        text        : str,
+        section_type: str,
+    ) -> list[dict]:
+        """
+        Pass 3: detect NAME \\n TITLE multiline headers.
+        Returns blocks if at least one found, else [].
+        """
+        splits = list(_MULTILINE_HEADER.finditer(text))
+        if not splits:
+            return []
+
+        blocks: list[dict] = []
+        preamble = text[:splits[0].start()].strip()
+        if len(preamble.split()) >= self.min_segment_words:
+            blocks.append({"raw_header": "", "text": preamble, "section_type": section_type})
+
+        for i, match in enumerate(splits):
+            header = f"{match.group('name')} - {match.group('title')}".strip()
+            start  = match.end()
+            end    = splits[i + 1].start() if i + 1 < len(splits) else len(text)
+            body   = text[start:end].strip()
+            blocks.append({"raw_header": header, "text": body, "section_type": section_type})
+
+        return blocks
+
+    def _pass4_heuristic(
+        self,
+        text        : str,
+        section_type: str,
+    ) -> list[dict]:
+        """
+        Pass 4: heuristic recovery — split on ALL CAPS lines or standalone 'Operator'.
+        Used when Passes 2 and 3 find no headers (e.g. malformed OCR text).
+        """
+        # Try ALL CAPS headers
+        splits = list(_ALL_CAPS_HEADER.finditer(text))
+
+        # Also detect standalone Operator lines
+        op_splits = list(_OPERATOR_HEADER.finditer(text))
+        all_splits = sorted(splits + op_splits, key=lambda m: m.start())
+
+        if not all_splits:
+            # No headers found at all — return whole section as one block
+            return [{
+                "raw_header"  : "",
+                "text"        : text.strip(),
+                "section_type": section_type,
+            }]
+
+        blocks: list[dict] = []
+        preamble = text[:all_splits[0].start()].strip()
+        if len(preamble.split()) >= self.min_segment_words:
+            blocks.append({"raw_header": "", "text": preamble, "section_type": section_type})
+
+        for i, match in enumerate(all_splits):
+            header = match.group(0).strip()
+            start  = match.end()
+            end    = all_splits[i + 1].start() if i + 1 < len(all_splits) else len(text)
+            body   = text[start:end].strip()
+            blocks.append({"raw_header": header, "text": body, "section_type": section_type})
+
+        return blocks
+
+    # =========================================================================
+    # Stage 4 — Role classification
+    # =========================================================================
+
+    def classify_speaker_role(
+        self,
+        raw_header  : str,
+        section_type: str,
+    ) -> tuple[str, str, str, str, float]:
+        """
+        Classify speaker name, role, and type from a raw header string.
+
+        Uses three-tier classification:
+            Tier 1: Explicit role keywords in title portion (highest confidence)
+            Tier 2: Analyst firm heuristics (medium confidence)
+            Tier 3: Section-aware fallback (lowest confidence)
+
+        Args:
+            raw_header  : Verbatim speaker header line
+            section_type: Section this header appears in
+
+        Returns:
+            (speaker_name, speaker_clean, speaker_role, speaker_type, confidence)
+        """
+        if not raw_header.strip():
+            return ("", "", SpeakerRole.UNKNOWN.value, SpeakerType.UNKNOWN.value, 0.0)
+
+        # Split on dash to get name and title
+        parts = re.split(r"\s*[-\u2013\u2014:]\s*", raw_header, maxsplit=1)
+        name  = parts[0].strip()
+        title = parts[1].strip() if len(parts) > 1 else ""
+
+        speaker_clean = name.lower().strip()
+        combined      = f"{name} {title}".strip()
+
+        # Check for operator first (unambiguous)
+        if re.search(r"(?i)\boperator\b", combined):
+            return (
+                name or "Operator",
+                "operator",
+                SpeakerRole.OPERATOR.value,
+                SpeakerType.OPERATOR.value,
+                1.0,
+            )
+
+        # Tier 1: explicit role keyword match
+        for pattern, role, stype in _ROLE_PATTERNS:
+            if pattern.search(combined):
+                confidence = 0.95 if title else 0.75
+                return (name, speaker_clean, role.value, stype.value, confidence)
+
+        # Tier 2: analyst firm in title
+        if _ANALYST_FIRM_KEYWORDS.search(combined):
+            return (name, speaker_clean, SpeakerRole.ANALYST.value, SpeakerType.ANALYST.value, 0.85)
+
+        # Tier 3: section-aware fallback
+        if section_type == SectionType.QA.value:
+            # Non-executive unknown speaker in QA → likely analyst
+            return (name, speaker_clean, SpeakerRole.ANALYST.value, SpeakerType.ANALYST.value, 0.45)
+
+        return (name, speaker_clean, SpeakerRole.UNKNOWN.value, SpeakerType.UNKNOWN.value, 0.30)
+
+    # =========================================================================
+    # Stage 5 — Segment extraction
+    # =========================================================================
+
+    def extract_segments(
+        self,
+        raw_blocks   : list[dict],
+        transcript_id: str,
+    ) -> list[Segment]:
+        """
+        Convert raw (header, text, section_type) blocks into Segment objects.
+
+        Assigns all schema fields including:
+            - is_question / is_answer (heuristic)
+            - token_estimate (character-based approximation)
+            - parsing_confidence (from role classifier + text quality)
+
+        Args:
+            raw_blocks   : Output of detect_speaker_blocks()
+            transcript_id: Unique transcript identifier
+
+        Returns:
+            Ordered list of Segment objects
+        """
+        segments: list[Segment] = []
+        order   : int           = 0
+        qa_counter: int         = 0
+        pending_question_id: Optional[str] = None
+
+        for block in raw_blocks:
+            raw_header   = block.get("raw_header", "")
+            text         = self.clean_segment_text(block.get("text", ""))
+            section_type = block.get("section_type", SectionType.UNKNOWN.value)
+
+            if not text.strip():
+                continue
+
+            # Classify speaker
+            (speaker, speaker_clean, role, stype, role_conf) = \
+                self.classify_speaker_role(raw_header, section_type)
+
+            # Override section_type for operator blocks
+            if stype == SpeakerType.OPERATOR.value:
+                section_type = SectionType.OPERATOR.value
+
+            # Compute metrics
+            words   = text.split()
+            wc      = len(words)
+            cc      = len(text)
+            tok_est = _token_estimate(text)
+
+            # QA heuristics
+            is_q  = (section_type == SectionType.QA.value
+                     and stype == SpeakerType.ANALYST.value
+                     and _is_question(text))
+            is_a  = (section_type == SectionType.QA.value
+                     and stype == SpeakerType.EXECUTIVE.value)
+
+            # QA pair linkage scaffold
+            qa_pair_id: Optional[str] = None
+            if is_q:
+                qa_counter      += 1
+                qa_pair_id       = f"{transcript_id}_qapair_{qa_counter:03d}"
+                pending_question_id = qa_pair_id
+            elif is_a and pending_question_id:
+                qa_pair_id          = pending_question_id
+                pending_question_id = None
+
+            # Confidence: blend role confidence with text quality signals
+            text_quality_conf = self._text_quality_confidence(text, wc)
+            final_confidence  = round((role_conf * 0.6 + text_quality_conf * 0.4), 3)
+
+            seg = Segment(
+                segment_id        = _make_segment_id(transcript_id, order),
+                transcript_id     = transcript_id,
+                order_index       = order,
+                section_type      = section_type,
+                speaker           = speaker,
+                speaker_clean     = speaker_clean,
+                speaker_role      = role,
+                speaker_type      = stype,
+                text              = text,
+                word_count        = wc,
+                char_count        = cc,
+                token_estimate    = tok_est,
+                is_question       = is_q,
+                is_answer         = is_a,
+                qa_pair_id        = qa_pair_id,
+                parsing_confidence= final_confidence,
+                raw_header        = raw_header,
+            )
+            segments.append(seg)
+            order += 1
+
+        return segments
+
+    # =========================================================================
+    # Stage 6 — Validation
+    # =========================================================================
+
+    def validate_segments(
+        self,
+        segments: list[Segment],
+    ) -> tuple[list[Segment], list[str]]:
+        """
+        Enforce structural and content validity rules.
+
+        Rules:
+            1. order_index must be strictly increasing
+            2. No segment with empty text (already filtered in extract_segments)
+            3. prepared_remarks must appear before qa in order_index
+            4. Operator-only transcript is flagged as invalid
+            5. Segment word count within bounds [min, max]
+            6. No two adjacent segments with identical speaker + text (dedup)
+
+        Args:
+            segments: Ordered list of Segment objects
+
+        Returns:
+            (filtered_segments, list_of_issue_strings)
+        """
+        issues  : list[str]    = []
+        filtered: list[Segment] = []
+
+        if not segments:
+            return [], ["No segments parsed"]
+
+        # Rule 4: operator-only transcript
+        non_op = [s for s in segments if s.speaker_type != SpeakerType.OPERATOR.value]
+        if not non_op:
+            issues.append("Transcript contains only operator segments — likely parsing failure")
+            return segments, issues  # return as-is for inspection
+
+        # Rule 3: prepared_remarks index < qa index
+        prep_indices = [s.order_index for s in segments if s.section_type == SectionType.PREPARED_REMARKS.value]
+        qa_indices   = [s.order_index for s in segments if s.section_type == SectionType.QA.value]
+        if prep_indices and qa_indices:
+            if max(prep_indices) > min(qa_indices):
+                issues.append(
+                    "Prepared remarks appear after QA segments — section boundary may be wrong"
+                )
+
+        seen_hashes: set[str] = set()
+
+        for seg in segments:
+            # Rule 1: order_index must be non-negative integer
+            if seg.order_index < 0:
+                issues.append(f"Negative order_index at seg {seg.segment_id}")
+                continue
+
+            # Rule 2: no empty text
+            if not seg.text.strip():
+                issues.append(f"Empty text at seg {seg.segment_id} — skipped")
+                continue
+
+            # Rule 5: word count bounds
+            if (
+seg.word_count < self.min_segment_words
+and seg.speaker_type == SpeakerType.UNKNOWN.value
+):
+                issues.append(
+                    f"Segment {seg.segment_id} too short ({seg.word_count} words) — skipped"
+                )
+                continue
+            if seg.word_count > self.max_segment_words:
+                issues.append(
+                    f"Segment {seg.segment_id} unusually long ({seg.word_count} words)"
+                )
+                # warn but keep
+
+            # Rule 6: deduplicate adjacent identical content
+            content_hash = hashlib.md5(
+                f"{seg.speaker_clean}::{seg.text[:200]}".encode()
+            ).hexdigest()
+            if content_hash in seen_hashes:
+                issues.append(
+                    f"Duplicate segment content at {seg.segment_id} — skipped"
+                )
+                continue
+            seen_hashes.add(content_hash)
+
+            filtered.append(seg)
+
+        # Re-index order_index after filtering
+        for new_idx, seg in enumerate(filtered):
+            object.__setattr__(seg, "order_index", new_idx) if hasattr(seg, "__setattr__") else None
+            # dataclass is mutable by default
+            seg.order_index = new_idx
+
+        return filtered, issues
+
+    # =========================================================================
+    # Helpers
+    # =========================================================================
+
+    @staticmethod
+    def clean_segment_text(text: str) -> str:
+        """
+        Clean body text of a single speaker segment.
+
+        Operations:
+            - Strip leading/trailing whitespace
+            - Collapse internal whitespace runs
+            - Remove residual header artefacts at start of text
+            - Remove transcript-end noise markers
+        """
+        if not text:
+            return ""
+        text = text.strip()
+        text = re.sub(r"[ \t]{2,}", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        # Remove common end-of-transcript markers
+        text = re.sub(
+            r"(?i)\s*(?:\[end of transcript\]|end of transcript|"
+            r"\[end\]|end of call)\s*$",
+            "",
+            text,
+        )
+        return text.strip()
+
+    @staticmethod
+    def _text_quality_confidence(text: str, word_count: int) -> float:
+        """
+        Heuristic text quality score ∈ [0.0, 1.0].
+
+        Penalises:
+            - Very short segments
+            - High ratio of non-alphabetic characters (OCR noise)
+            - All-caps text (may be header misclassified as body)
+        """
+        if word_count < 5:
+            return 0.2
+        if word_count < 20:
+            base = 0.5
+        else:
+            base = 0.9
+
+        # Penalise non-alpha ratio
+        alpha_chars = sum(1 for c in text if c.isalpha())
+        total_chars = len(text)
+        alpha_ratio = alpha_chars / max(total_chars, 1)
+        if alpha_ratio < 0.5:
+            base -= 0.3
+        elif alpha_ratio < 0.7:
+            base -= 0.1
+
+        # Penalise all-caps (likely misclassified header)
+        if text == text.upper() and word_count < 10:
+            base -= 0.2
+
+        return max(0.0, min(1.0, round(base, 3)))
+
+    def _merge_adjacent_segments(self, segments: list[Segment]) -> list[Segment]:
+        """
+        Merge consecutive segments from the same speaker in the same section.
+
+        Preserves all other fields from the first segment of the merged group.
+        Recalculates word_count, char_count, token_estimate, is_question, is_answer.
+        """
+        if not segments:
+            return []
+
+        merged  : list[Segment] = []
+        current : Segment       = segments[0]
+
+        for nxt in segments[1:]:
+            same_speaker  = current.speaker_clean == nxt.speaker_clean
+            same_section  = current.section_type  == nxt.section_type
+            neither_op    = (
+                current.speaker_type != SpeakerType.OPERATOR.value
+                and nxt.speaker_type != SpeakerType.OPERATOR.value
+            )
+
+            if same_speaker and same_section and neither_op:
+                # Merge nxt into current
+                merged_text = current.text + "\n\n" + nxt.text
+                current = Segment(
+                    segment_id        = current.segment_id,
+                    transcript_id     = current.transcript_id,
+                    order_index       = current.order_index,
+                    section_type      = current.section_type,
+                    speaker           = current.speaker,
+                    speaker_clean     = current.speaker_clean,
+                    speaker_role      = current.speaker_role,
+                    speaker_type      = current.speaker_type,
+                    text              = merged_text,
+                    word_count        = len(merged_text.split()),
+                    char_count        = len(merged_text),
+                    token_estimate    = _token_estimate(merged_text),
+                    is_question       = current.is_question or nxt.is_question,
+                    is_answer         = current.is_answer  or nxt.is_answer,
+                    qa_pair_id        = current.qa_pair_id or nxt.qa_pair_id,
+                    parsing_confidence= min(current.parsing_confidence, nxt.parsing_confidence),
+                    raw_header        = current.raw_header,
+                )
+            else:
+                merged.append(current)
+                current = nxt
+
+        merged.append(current)
+        return merged
+
+    # =========================================================================
+    # Export helpers
+    # =========================================================================
+
+    @staticmethod
+    def to_dataframe(segments: list[Segment]) -> pd.DataFrame:
+        """
+        Convert a list of Segment objects to a flat pandas DataFrame.
+
+        Returns empty DataFrame if segments list is empty.
+        """
+        if not segments:
+            return pd.DataFrame()
+        return pd.DataFrame([s.to_dict() for s in segments])
+
+    @staticmethod
+    def to_parquet(
+        segments : list[Segment],
+        path     : str | Path,
+        compression: str = "snappy",
+    ) -> Path:
+        """
+        Persist segments to a Parquet file.
+
+        Args:
+            segments   : List of Segment objects
+            path       : Output file path (parent dirs created automatically)
+            compression: Parquet compression codec
+
+        Returns:
+            Resolved Path of the written file
+        """
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        df  = TranscriptSegmenter.to_dataframe(segments)
+        df.to_parquet(out, index=False, compression=compression)
+        log.info(f"Saved {len(segments)} segments → {out}")
+        return out
+
+    @staticmethod
+    def compute_confidence(
+        role_confidence : float,
+        text_quality    : float,
+        header_present  : bool,
+    ) -> float:
+        """
+        Standalone confidence computation for external callers or testing.
+
+        Args:
+            role_confidence: Confidence from role classifier (0.0–1.0)
+            text_quality   : Text quality score (0.0–1.0)
+            header_present : Whether a structured header was found
+
+        Returns:
+            Blended confidence score ∈ [0.0, 1.0]
+        """
+        header_bonus = 0.05 if header_present else 0.0
+        score = (role_confidence * 0.6) + (text_quality * 0.4) + header_bonus
+        return round(min(1.0, max(0.0, score)), 3)
