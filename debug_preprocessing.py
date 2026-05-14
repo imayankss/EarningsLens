@@ -1,102 +1,92 @@
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
 import pandas as pd
 
-from src.preprocessing.preprocessing_pipeline import PreprocessingPipeline
-from src.preprocessing.chunking import ChunkingConfig, TranscriptChunker
+from src.preprocessing.metadata_extractor import MetadataExtractor
+from src.preprocessing.speaker_extractor import SpeakerExtractor
 
 
-sample_text = """
-Operator
+def validate_segments(df: pd.DataFrame) -> None:
+    assert len(df) > 0, "No speaker segments produced"
+    assert "speaker" in df.columns, "Missing speaker column"
+    assert "text" in df.columns, "Missing text column"
+    assert df["text"].str.len().mean() > 20, "Average segment text is too short"
 
-Welcome everyone to the quarterly earnings conference call.
+    sections = df["section"].tolist() if "section" in df.columns else []
+    if "prepared_remarks" in sections and "qa" in sections:
+        assert sections.index("prepared_remarks") < sections.index("qa"), (
+            "Expected prepared_remarks to appear before qa"
+        )
 
-John Smith - Chief Executive Officer
 
-Thank you everyone for joining us today.
-We delivered very strong quarterly performance across all segments.
-Revenue increased significantly year over year driven by strong customer demand,
-higher retention, improved operational efficiency, and expansion into new markets.
+def run(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    text = path.read_text(encoding="utf-8")
 
-Our cloud division performed exceptionally well this quarter and margins improved
-due to disciplined cost optimization initiatives. Enterprise adoption trends remain strong.
+    meta = MetadataExtractor(text=text, filename=path.name).extract_all()
+    extractor = SpeakerExtractor()
+    result = extractor.extract(text)
 
-We also continued investing in artificial intelligence infrastructure and long-term
-platform capabilities. Customer engagement metrics improved across all regions.
+    segments_df = pd.DataFrame(result.to_records())
+    validate_segments(segments_df)
 
-Jane Doe - Chief Financial Officer
+    meta_df = pd.DataFrame([meta.to_dict()])
+    transcript_id = meta.transcript_id or path.stem
+    segments_df.insert(0, "transcript_id", transcript_id)
+    segments_df.insert(1, "source_file", path.name)
 
-Operating income increased substantially compared to the prior year.
-Cash flow remained strong and balance sheet quality improved materially.
+    metadata_dir = Path("data/interim/metadata")
+    segments_dir = Path("data/interim/segmented_transcripts")
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    segments_dir.mkdir(parents=True, exist_ok=True)
 
-We reduced debt, expanded free cash flow generation,
-and maintained strong liquidity throughout the quarter.
+    meta_out = metadata_dir / f"{path.stem}_metadata.parquet"
+    segments_out = segments_dir / f"{path.stem}_segments.parquet"
+    meta_df.to_parquet(meta_out, index=False)
+    segments_df.to_parquet(segments_out, index=False)
 
-Looking ahead, we remain optimistic about demand trends,
-customer expansion opportunities, and long-term profitability.
-
-Operator
-
-We will now begin the question-and-answer session.
-
-Michael Lee - Goldman Sachs
-
-Can you discuss guidance expectations for next quarter and margin outlook?
-
-John Smith - Chief Executive Officer
-
-We expect continued momentum next quarter with stable demand trends,
-improving margins, and continued enterprise adoption across products.
-
-We remain confident in long-term execution and growth opportunities.
-"""
-
-df = pd.DataFrame(
-    [
-        {
-            "transcript_id": "AAPL_20240130",
-            "ticker": "AAPL",
-            "earnings_date": "2024-01-30",
-            "transcript_text": sample_text,
-        }
+    print("=" * 72)
+    print(f"File: {path}")
+    print(f"Transcript ID: {transcript_id}")
+    print(f"Metadata output: {meta_out}")
+    print(f"Segments output: {segments_out}")
+    print("=" * 72)
+    print("Metadata:")
+    print(meta_df.to_string(index=False))
+    print("\nSegment shape:", segments_df.shape)
+    print("\nSection counts:")
+    print(segments_df["section"].value_counts(dropna=False).to_string())
+    print("\nSpeaker types:")
+    print(segments_df["speaker_type"].value_counts(dropna=False).to_string())
+    print("\nParse patterns:")
+    print(pd.Series(result.parse_pattern_counts).to_string())
+    if result.warnings:
+        print("\nWarnings:")
+        for warning in result.warnings[:10]:
+            print(f"- {warning}")
+    print("\nSample rows:")
+    cols = [
+        "sequence_index", "speaker", "speaker_type", "section",
+        "normalized_role", "word_count", "parse_pattern", "text",
     ]
-)
+    print(segments_df[cols].head(12).to_string(index=False, max_colwidth=100))
+
+    return meta_df, segments_df
 
 
-pipeline = PreprocessingPipeline()
-pipeline.chunker = TranscriptChunker(
-    ChunkingConfig(
-        min_tokens=20,
-        target_tokens=80,
-        max_tokens=120,
-        overlap_tokens=10,
-        sentence_tokenizer="regex",
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Debug Day 4 transcript parsing")
+    parser.add_argument(
+        "path",
+        nargs="?",
+        default="data/raw/sample_transcripts/AAPL_Q4_2024.txt",
+        help="Transcript .txt file to parse",
     )
-)
+    args = parser.parse_args()
+    run(Path(args.path))
 
-result = pipeline.run(df)
 
-print("\n" + "=" * 60)
-print("PIPELINE SUMMARY")
-print("=" * 60)
-
-for key, value in result.summary.items():
-    print(f"{key}: {value}")
-
-print("\n" + "=" * 60)
-print("TRANSCRIPTS DF")
-print("=" * 60)
-print(result.transcripts_df.head())
-
-print("\n" + "=" * 60)
-print("SEGMENTS DF")
-print("=" * 60)
-print(result.segments_df.head())
-
-print("\n" + "=" * 60)
-print("CHUNKS DF")
-print("=" * 60)
-print(result.chunks_df.head())
-
-print("\n" + "=" * 60)
-print("VALIDATION REPORT")
-print("=" * 60)
-print(result.validation_report.head())
+if __name__ == "__main__":
+    main()

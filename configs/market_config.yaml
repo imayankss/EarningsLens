@@ -1,0 +1,570 @@
+# =============================================================================
+# market_config.yaml
+# =============================================================================
+# Centralized configuration for the Day 5 market data pipeline.
+#
+# Used by:
+#   src/finance/market_data_loader.py
+#   src/finance/benchmark_loader.py
+#   src/finance/trading_calendar.py
+#   src/finance/feature_engineering.py
+#   src/finance/event_alignment.py
+#   src/finance/market_dataset_builder.py
+#
+# Conventions:
+#   - Paths are relative to the project root unless otherwise noted.
+#   - Dates follow ISO-8601 (YYYY-MM-DD).
+#   - Times follow HH:MM (24-hour, local exchange time).
+#   - All monetary values are in USD.
+#   - Duration fields (retry_delay) are in seconds unless annotated.
+#
+# Versioning:
+#   Bump `project.version` whenever a breaking schema change is made so
+#   downstream loaders can guard on the version number.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. PROJECT
+# Top-level project identity and shared runtime settings.
+# -----------------------------------------------------------------------------
+project:
+  project_name: earnings_call_sentiment_analyzer
+  version: "1.0.0"
+
+  # IANA timezone used as the default for all naive timestamp operations.
+  # NYSE operates in America/New_York; keep this in sync with trading_calendar.
+  timezone: "America/New_York"
+
+  # Human-readable description — used in log headers and report titles.
+  description: >
+    Financial NLP pipeline that links earnings-call transcripts to
+    market reactions via event-study methodology.
+
+  # Pipeline stage that this config file targets.
+  # Options: day5_market | day6_sentiment_merge | day7_finbert | day8_event_study
+  pipeline_stage: day5_market
+
+
+# -----------------------------------------------------------------------------
+# 2. PATHS
+# All I/O paths are relative to the project root.
+# Do NOT hardcode machine-specific or user-specific paths here.
+# -----------------------------------------------------------------------------
+paths:
+  # ── Input ──────────────────────────────────────────────────────────────────
+
+  # Parquet produced by Day 4 transcript structurer.
+  # Required columns: transcript_id, ticker, earnings_date, quarter, year
+  transcript_metadata: data/interim/transcript_metadata.parquet
+
+  # Optional: override with a CSV for quick ad-hoc runs.
+  # transcript_metadata: data/interim/transcript_metadata.csv
+
+  # ── Raw layer (never overwritten after download) ───────────────────────────
+  raw_market_dir: data/raw/market          # per-ticker OHLCV parquet files
+  benchmark_dir:  data/raw/market/benchmark  # benchmark parquet files
+
+  # ── Interim layer (computed, reproducible) ─────────────────────────────────
+  interim_dir: data/interim
+  # Key interim outputs:
+  #   data/interim/aligned_events.parquet
+  #   data/interim/benchmark_returns.parquet
+  #   data/interim/event_market_alignment.parquet
+
+  # ── Processed layer (analytics-ready, final joins) ────────────────────────
+  processed_dir: data/processed
+  # Key processed outputs:
+  #   data/processed/market_data.parquet
+  #   data/processed/market_data.csv
+
+  # ── Logs ──────────────────────────────────────────────────────────────────
+  log_dir: logs/market_pipeline
+
+
+# -----------------------------------------------------------------------------
+# 3. BENCHMARK
+# S&P 500 benchmark retrieval via yfinance.
+# The benchmark return is used to compute abnormal returns for every event.
+# -----------------------------------------------------------------------------
+benchmark:
+  # Primary benchmark — S&P 500 composite index.
+  ticker: "^GSPC"
+
+  # ── Alternative benchmarks (uncomment to switch) ──────────────────────────
+  # Use SPY (ETF) for more liquidity-aligned comparisons.
+  # ticker: "SPY"
+  #
+  # Use QQQ for tech-heavy transcript universes (NVDA, AAPL, MSFT, etc.).
+  # ticker: "QQQ"
+  #
+  # Use ^RUT (Russell 2000) for small-cap transcript coverage.
+  # ticker: "^RUT"
+
+  # Return split- and dividend-adjusted prices (required for correct returns).
+  auto_adjust: true
+
+  # Number of retry attempts on transient yfinance failures.
+  retry_count: 3
+
+  # Seconds to wait between retries (linear backoff).
+  retry_delay: 2.0
+
+  # Save the unvalidated raw download alongside the processed file.
+  # Useful for debugging data-quality issues without re-downloading.
+  save_raw: false
+
+  # Output filename base (without extension).
+  # Full path: {paths.benchmark_dir}/{filename}.parquet
+  filename: sp500_benchmark
+
+  # Calendar window pre-loaded into the benchmark loader.
+  # Must cover all earnings dates in the transcript universe + buffer.
+  data_start: "2019-01-01"
+  data_end:   "2026-12-31"
+
+
+# -----------------------------------------------------------------------------
+# 4. MARKET DATA
+# Per-ticker OHLCV download settings for stock price data.
+# -----------------------------------------------------------------------------
+market_data:
+  # Return split- and dividend-adjusted prices (required for return accuracy).
+  auto_adjust: true
+
+  # yfinance retry settings — same semantics as benchmark section.
+  retry_count: 3
+  retry_delay: 2.0            # seconds between retries
+
+  # Trading-day buffer around each earnings date.
+  # The downloader fetches:
+  #   start = earnings_date - trading_buffer_before (calendar days)
+  #   end   = earnings_date + trading_buffer_after  (calendar days)
+  # Set generously to ensure rolling-window features have enough history.
+  trading_buffer_before: 90   # ~60 trading days of history + safety margin
+  trading_buffer_after:  20   # covers post_event_window + safety margin
+
+  # Persist the raw (pre-validation) download per ticker.
+  save_raw: false
+
+  # Number of tickers to download in a single yfinance batch call.
+  # Larger batches reduce HTTP round-trips; smaller batches reduce memory use.
+  # Recommended range: 5–20.
+  batch_size: 10
+
+  # Calendar window used when the downloader needs a global date range
+  # (e.g. for a full-universe refresh rather than event-driven downloads).
+  data_start: "2019-01-01"
+  data_end:   "2026-12-31"
+
+  # File naming pattern for per-ticker raw parquet files.
+  # Supported token: {ticker}
+  # Full path: {paths.raw_market_dir}/{ticker_filename_pattern}
+  ticker_filename_pattern: "{ticker}_market.parquet"
+
+
+# -----------------------------------------------------------------------------
+# 5. TRADING CALENDAR
+# NYSE calendar configuration for event-date alignment.
+# Controls how earnings timestamps are mapped to valid trading sessions.
+# -----------------------------------------------------------------------------
+trading_calendar:
+  # Exchange calendar identifier (pandas_market_calendars key).
+  # Supported: NYSE, NASDAQ, CME, LSE, TSX, ...
+  exchange: "NYSE"
+
+  # Regular session hours in local exchange time (America/New_York).
+  # Used for before-open / after-close alignment decisions.
+  market_open:  "09:30"   # HH:MM, 24-hour
+  market_close: "16:00"   # HH:MM, 24-hour
+
+  # IANA timezone for session-boundary comparisons.
+  # Must match the exchange's primary operating timezone.
+  timezone: "America/New_York"
+
+  # Date range pre-loaded into the TradingCalendarEngine session cache.
+  # Cover your full transcript date universe plus a generous buffer.
+  calendar_start: "2000-01-01"
+  calendar_end:   "2035-12-31"
+
+  # How to handle earnings releases with no explicit time component.
+  # true  → treat as after-close (conservative, most common real-world pattern)
+  # false → treat as before-open (aggressive; use only when time is unreliable)
+  assume_date_only_is_after_close: true
+
+  # When an earnings event falls on a weekend or market holiday, align to:
+  # "next"     → next valid NYSE trading session (standard)
+  # "previous" → previous valid NYSE trading session (use with caution)
+  holiday_alignment_direction: "next"
+
+
+# -----------------------------------------------------------------------------
+# 6. EVENT ALIGNMENT
+# Controls how earnings events are mapped to symmetric market windows.
+# These settings directly determine the event-study panel structure.
+# -----------------------------------------------------------------------------
+event_alignment:
+  # Number of trading days BEFORE the aligned event date (day 0) to include.
+  # Relative days: [-pre_event_window, ..., -1]
+  # Used for: pre-event return benchmarking, rolling feature calculation.
+  pre_event_window: 30
+
+  # Number of trading days AFTER the aligned event date (day 0) to include.
+  # Relative days: [+1, ..., +post_event_window]
+  # Used for: post-announcement drift, CAR accumulation, reaction analysis.
+  post_event_window: 10
+
+  # Drop events whose market data cannot fill the full pre+post window.
+  # true  → strict mode; only complete windows enter final dataset
+  # false → permissive mode; partial windows are flagged but retained
+  require_complete_window: true
+
+  # Align after-hours earnings releases to the NEXT trading session.
+  # If false, an after-hours release stays on the same calendar date
+  # (incorrect for most event-study designs).
+  align_after_hours_to_next_session: true
+
+  # Column name in market data that holds the trading date.
+  date_column_name: "date"
+
+  # Column name in market data that holds the benchmark return.
+  benchmark_column_name: "benchmark_return"
+
+  # Primary output of event_alignment.py
+  output_filename: "event_market_alignment"
+
+  # ── Advanced: overlapping-event handling ──────────────────────────────────
+  # When two earnings events for the same ticker have overlapping windows,
+  # this controls deduplication behavior.
+  # Options: keep_first | keep_last | keep_both | raise_error
+  overlapping_event_policy: "keep_both"
+
+  # Minimum gap (in trading days) between two events for the same ticker
+  # before they are considered overlapping. Only relevant when
+  # overlapping_event_policy is "keep_first" or "keep_last".
+  min_inter_event_gap: 5
+
+
+# -----------------------------------------------------------------------------
+# 7. FEATURE ENGINEERING
+# Return horizons, rolling windows, and momentum parameters.
+# All window sizes are in TRADING DAYS unless annotated.
+# -----------------------------------------------------------------------------
+feature_engineering:
+  # ── Forward return horizons ───────────────────────────────────────────────
+  # Post-event return columns generated for each event (relative to day 0).
+  # Each entry N produces a column: return_{N}d
+  return_horizons:
+    - 1    # next-day return
+    - 2    # two-day cumulative
+    - 3    # three-day cumulative
+    - 5    # one-week cumulative
+
+  # ── Rolling volatility ────────────────────────────────────────────────────
+  # Window for annualized rolling standard deviation of daily returns.
+  # 20 trading days ≈ 1 calendar month.
+  rolling_volatility_window: 20
+
+  # ── Moving averages ───────────────────────────────────────────────────────
+  # Simple moving averages computed on adjusted close prices.
+  # Each entry N produces a column: sma_{N}
+  moving_average_windows:
+    - 20   # short-term trend (~1 month)
+    - 50   # medium-term trend (~2.5 months)
+
+  # ── Momentum features ─────────────────────────────────────────────────────
+  # Price momentum lookback periods. Each N produces: momentum_{N}d
+  momentum_windows:
+    - 5    # weekly momentum
+    - 20   # monthly momentum
+
+  # ── Return annualization ─────────────────────────────────────────────────
+  # Standard NYSE trading days per year. Used in volatility scaling:
+  #   annualized_vol = rolling_std * sqrt(annualization_factor)
+  annualization_factor: 252
+
+  # Minimum number of non-NaN observations required for rolling calculations.
+  # Rows with fewer observations receive NaN rather than a potentially
+  # misleading partial-window estimate.
+  min_periods: 10
+
+  # ── Additional features (optional; controlled by feature flags) ───────────
+  # Enable or disable individual feature groups for this pipeline run.
+  features:
+    daily_return:         true
+    forward_returns:      true
+    abnormal_return:      true
+    cumulative_ar:        true    # CAR columns (car_1d, car_3d, car_5d)
+    rolling_volatility:   true
+    moving_averages:      true
+    momentum:             true
+    relative_volume:      true    # volume / rolling_mean_volume
+    price_gap:            true    # open - previous_close (gap detection)
+
+  # ── Future factor-model extensions (placeholder) ──────────────────────────
+  # Uncomment and populate when extending to multi-factor abnormal returns.
+  # factor_model:
+  #   model: "fama_french_3"       # Options: capm | ff3 | ff5 | custom
+  #   factors_source: "data/external/ff_factors.parquet"
+  #   estimation_window: 120       # trading days for beta estimation
+  #   estimation_lag: 30           # days between estimation and event window
+
+
+# -----------------------------------------------------------------------------
+# 8. VALIDATION
+# Quality gates applied at each pipeline stage.
+# Failing a validation check raises ValueError by default unless
+# the corresponding "on_failure" key is set to "warn".
+# -----------------------------------------------------------------------------
+validation:
+  # ── Missing-value policy ──────────────────────────────────────────────────
+  # Allow rows with NaN values to pass through the pipeline.
+  # false → any NaN in a required column raises a validation error.
+  allow_missing_values: false
+
+  # Maximum fraction of missing values tolerated in any single column
+  # before the pipeline emits a warning (or error when allow_missing_values
+  # is false).  Range: 0.0 – 1.0
+  max_missing_ratio: 0.05
+
+  # ── Deduplication ─────────────────────────────────────────────────────────
+  # Automatically remove duplicate (ticker, date) rows in market data.
+  # When false, duplicates raise a ValueError.
+  remove_duplicates: true
+
+  # ── Trading-day validation ────────────────────────────────────────────────
+  # Verify that every aligned_event_date is a valid NYSE trading session.
+  validate_trading_days: true
+
+  # ── Return sanity bounds ──────────────────────────────────────────────────
+  # Flag daily returns whose absolute value exceeds this threshold.
+  # NYSE circuit breakers trigger at 7 / 13 / 20%; 1.0 catches data errors.
+  validate_returns: true
+  max_abs_daily_return: 1.0     # 100% — catches corrupt data, not real moves
+
+  # ── Close-price sanity ────────────────────────────────────────────────────
+  # Reject any row where close price is zero or negative.
+  validate_positive_prices: true
+
+  # ── Event-window integrity ────────────────────────────────────────────────
+  # Every aligned event must have exactly one row with relative_day == 0.
+  require_event_day_zero: true
+
+  # No duplicate (transcript_id, relative_day) pairs are allowed.
+  require_unique_window_rows: true
+
+  # ── Benchmark coverage ────────────────────────────────────────────────────
+  # Minimum fraction of event-window rows that must have a non-null
+  # benchmark return.  Pipeline warns below this threshold.
+  min_benchmark_coverage: 0.95
+
+  # ── On-failure behavior ───────────────────────────────────────────────────
+  # Global override for non-critical validation failures.
+  # Options: "raise" | "warn" | "log"
+  on_non_critical_failure: "warn"
+
+
+# -----------------------------------------------------------------------------
+# 9. EXPORTS
+# Controls the format, location, and metadata of pipeline outputs.
+# -----------------------------------------------------------------------------
+exports:
+  # Write a CSV alongside every Parquet file for human-readable inspection.
+  export_csv: true
+
+  # Always export Parquet (primary format for ML / downstream stages).
+  export_parquet: true
+
+  # Parquet compression codec.
+  # Options: snappy (fast) | gzip (smaller) | zstd (best ratio) | none
+  compression: "snappy"
+
+  # Append a UTC timestamp suffix to output filenames to prevent overwrites
+  # during iterative runs.  When false, files are overwritten in-place.
+  # Example output: market_data_20250130T143022Z.parquet
+  include_timestamp: false
+
+  # ── File naming ───────────────────────────────────────────────────────────
+  filenames:
+    market_data:          "market_data"
+    benchmark_returns:    "benchmark_returns"
+    aligned_events:       "aligned_events"
+    event_alignment:      "event_market_alignment"
+
+  # ── Schema control ────────────────────────────────────────────────────────
+  # Drop intermediate/diagnostic columns from the final processed export.
+  # Intermediate columns include: alignment_reason, was_adjusted, market_session
+  drop_intermediate_columns: false
+
+  # Columns to always include in the final processed export.
+  # Any column not listed here is dropped when drop_intermediate_columns=true.
+  required_output_columns:
+    - transcript_id
+    - ticker
+    - earnings_date
+    - aligned_event_date
+    - quarter
+    - year
+    - date
+    - relative_day
+    - is_event_day
+    - open
+    - high
+    - low
+    - close
+    - adj_close
+    - volume
+    - daily_return
+    - benchmark_return
+    - abnormal_return
+    - return_1d
+    - return_3d
+    - return_5d
+    - rolling_volatility_20d
+    - sma_20
+    - sma_50
+    - relative_volume
+
+  # ── Parquet write options ─────────────────────────────────────────────────
+  parquet:
+    # Row-group size; larger groups improve read performance for columnar scans.
+    row_group_size: 100000
+    # Write pandas metadata into the Parquet schema (enables round-trip fidelity).
+    write_pandas_metadata: true
+
+  # ── CSV write options ─────────────────────────────────────────────────────
+  csv:
+    index: false
+    date_format: "%Y-%m-%d"
+    float_format: "%.6f"
+    encoding: "utf-8"
+
+
+# -----------------------------------------------------------------------------
+# 10. LOGGING
+# Structured logging configuration shared across all Day 5 modules.
+# Each module uses logging.getLogger(__name__) and inherits these settings
+# when the root logger is configured by the pipeline runner.
+# -----------------------------------------------------------------------------
+logging:
+  # Logging verbosity level.
+  # Options: DEBUG | INFO | WARNING | ERROR | CRITICAL
+  level: "INFO"
+
+  # Log message format string (Python logging syntax).
+  format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+
+  # Date format for log timestamps.
+  datefmt: "%Y-%m-%d %H:%M:%S"
+
+  # Write log output to a file in addition to stdout.
+  save_logs: true
+
+  # Log file directory (relative to project root).
+  # Actual file: {log_dir}/market_pipeline_{YYYYMMDD}.log
+  log_dir: "logs/market_pipeline"
+
+  # Maximum log file size before rotation (in megabytes).
+  max_log_size_mb: 50
+
+  # Number of rotated log files to retain.
+  backup_count: 5
+
+  # Per-module log level overrides.
+  # Use to suppress verbose debug output from specific modules in production.
+  module_levels:
+    src.finance.trading_calendar:       "INFO"
+    src.finance.benchmark_loader:       "INFO"
+    src.finance.market_data_loader:     "INFO"
+    src.finance.feature_engineering:    "INFO"
+    src.finance.event_alignment:        "INFO"
+    src.finance.market_dataset_builder: "INFO"
+    # Uncomment to debug calendar alignment in detail:
+    # src.finance.trading_calendar:     "DEBUG"
+
+  # Suppress noisy third-party library logs.
+  suppress_loggers:
+    - "yfinance"
+    - "urllib3"
+    - "requests"
+    - "peewee"
+
+
+# =============================================================================
+# APPENDIX A — ALTERNATIVE BENCHMARK CONFIGURATIONS
+# Copy the desired block into the `benchmark` section to switch benchmarks.
+# =============================================================================
+#
+# --- SPY (SPDR S&P 500 ETF) ---
+# Preferred over ^GSPC when you need tradable, ETF-priced benchmark returns.
+# SPY has marginally lower returns than ^GSPC due to the expense ratio (~4bp).
+#
+# benchmark:
+#   ticker: "SPY"
+#   auto_adjust: true
+#   retry_count: 3
+#   retry_delay: 2.0
+#   save_raw: false
+#   filename: spy_benchmark
+#   data_start: "2019-01-01"
+#   data_end:   "2026-12-31"
+#
+# --- QQQ (Invesco NASDAQ-100 ETF) ---
+# Use for tech-sector-heavy transcript universes (AI/semiconductor earnings).
+#
+# benchmark:
+#   ticker: "QQQ"
+#   auto_adjust: true
+#   retry_count: 3
+#   retry_delay: 2.0
+#   save_raw: false
+#   filename: qqq_benchmark
+#   data_start: "2019-01-01"
+#   data_end:   "2026-12-31"
+
+
+# =============================================================================
+# APPENDIX B — ADVANCED / EXPERIMENTAL SETTINGS
+# These keys are parsed by the pipeline but default to disabled.
+# Activate by moving them into the relevant top-level section.
+# =============================================================================
+#
+# ── Sector-neutral abnormal returns ──────────────────────────────────────────
+# Subtract a sector ETF return instead of (or in addition to) S&P 500.
+# Useful for within-sector event studies.
+#
+# sector_benchmarks:
+#   XLK: "Technology"       # SPDR Technology Select
+#   XLF: "Financials"       # SPDR Financials Select
+#   XLV: "Healthcare"       # SPDR Healthcare Select
+#   XLE: "Energy"           # SPDR Energy Select
+#
+# ── Earnings-call time source ─────────────────────────────────────────────────
+# When transcript metadata includes a `call_time` column (e.g. from an
+# earnings calendar API), use it to refine the before/after alignment.
+#
+# earnings_time:
+#   use_call_time_column: false
+#   call_time_column: "call_time"
+#   call_time_timezone: "America/New_York"
+#   fallback_to_date_only: true
+#
+# ── Parallel download ─────────────────────────────────────────────────────────
+# Enable concurrent ticker downloads for large universes.
+# Requires careful rate-limit management to avoid yfinance bans.
+#
+# parallel:
+#   enabled: false
+#   max_workers: 4            # number of concurrent download threads
+#   rate_limit_pause: 0.5     # seconds between batches
+#
+# ── Factor model placeholder ─────────────────────────────────────────────────
+# Scaffolding for future Fama-French or CAPM beta estimation.
+#
+# factor_model:
+#   enabled: false
+#   model: "capm"             # Options: capm | ff3 | ff5
+#   estimation_window: 120    # trading days
+#   estimation_lag: 30        # days between window end and event
+#   min_obs: 60               # minimum valid observations for beta estimation
+#   factors_path: "data/external/ff_factors_daily.parquet"
