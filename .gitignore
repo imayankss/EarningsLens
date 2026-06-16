@@ -22,6 +22,7 @@ build/
 .env
 .env.local
 .env.*.local
+.streamlit/secrets.toml
 
 # Data — never commit raw/interim/processed data
 data/raw/*
@@ -36,6 +37,13 @@ models/*
 !data/dictionaries/loughran_mcdonald/.gitkeep
 !models/.gitkeep
 !logs/.gitkeep
+
+# Day 11+ deliverables intentionally tracked
+!data/processed/master_dataset.csv
+!data/processed/master_dataset.parquet
+!data/processed/nlp/
+!data/processed/nlp/**
+!models/predictive_model_metadata.json
 
 # Logs
 logs/*
@@ -66,9 +74,17 @@ logs/*
 
 # Streamlit
 .streamlit/
+.streamlit/*
+!.streamlit/.gitkeep
 
-# Reports (keep structure, ignore outputs)
+# Temporary files
+temp/
+tmp/
+
+# Reports (keep structure and generated portfolio artifacts)
 reports/figures/*
 reports/tables/*
 !reports/figures/.gitkeep
 !reports/tables/.gitkeep
+!reports/figures/*.png
+!reports/tables/*.csv

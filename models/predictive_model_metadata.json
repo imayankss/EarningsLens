@@ -1,0 +1,58 @@
+{
+  "feature_columns": [
+    "finbert_score",
+    "finbert_positive",
+    "finbert_negative",
+    "finbert_neutral",
+    "lm_tone_score",
+    "lm_positive_count",
+    "lm_negative_count",
+    "score_difference",
+    "absolute_difference",
+    "mean_confidence",
+    "uncertainty_count",
+    "uncertainty_ratio",
+    "top_keyword_count",
+    "topic_revenue_growth_count",
+    "topic_guidance_outlook_count",
+    "topic_risk_uncertainty_count",
+    "mean_return",
+    "std_return",
+    "mean_abnormal_return",
+    "mean_volume",
+    "price_min",
+    "price_max",
+    "market_row_count",
+    "word_count_clean",
+    "chunk_count"
+  ],
+  "models_attempted": [
+    "target_positive_ar_1d:logistic_regression",
+    "target_positive_ar_1d:random_forest",
+    "target_positive_ar_1d:xgboost",
+    "target_positive_ar_3d:logistic_regression",
+    "target_positive_ar_3d:random_forest",
+    "target_positive_ar_3d:xgboost",
+    "target_positive_return_1d:logistic_regression",
+    "target_positive_return_1d:random_forest",
+    "target_positive_return_1d:xgboost"
+  ],
+  "models_trained": [],
+  "row_count": 1,
+  "skipped_reasons": {
+    "target_positive_ar_1d:logistic_regression": "insufficient_sample_size",
+    "target_positive_ar_1d:random_forest": "insufficient_sample_size",
+    "target_positive_ar_1d:xgboost": "insufficient_sample_size",
+    "target_positive_ar_3d:logistic_regression": "insufficient_sample_size",
+    "target_positive_ar_3d:random_forest": "insufficient_sample_size",
+    "target_positive_ar_3d:xgboost": "insufficient_sample_size",
+    "target_positive_return_1d:logistic_regression": "insufficient_sample_size",
+    "target_positive_return_1d:random_forest": "insufficient_sample_size",
+    "target_positive_return_1d:xgboost": "insufficient_sample_size"
+  },
+  "target_columns": [
+    "target_positive_ar_1d",
+    "target_positive_ar_3d",
+    "target_positive_return_1d"
+  ]
+}

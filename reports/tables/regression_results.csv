@@ -1,0 +1,11 @@
+target_column,feature_columns,n_observations,r_squared,adj_r_squared,coefficients,p_values,status
+return_1d,finbert_score|lm_tone_score|score_difference|absolute_difference,1,,,{},{},insufficient_sample_size
+ar_1d,finbert_score|lm_tone_score|score_difference|absolute_difference,1,,,{},{},insufficient_sample_size
+return_2d,finbert_score|lm_tone_score|score_difference|absolute_difference,1,,,{},{},insufficient_sample_size
+ar_2d,finbert_score|lm_tone_score|score_difference|absolute_difference,1,,,{},{},insufficient_sample_size
+return_3d,finbert_score|lm_tone_score|score_difference|absolute_difference,1,,,{},{},insufficient_sample_size
+ar_3d,finbert_score|lm_tone_score|score_difference|absolute_difference,1,,,{},{},insufficient_sample_size
+return_5d,finbert_score|lm_tone_score|score_difference|absolute_difference,1,,,{},{},insufficient_sample_size
+ar_5d,finbert_score|lm_tone_score|score_difference|absolute_difference,1,,,{},{},insufficient_sample_size
+return_10d,finbert_score|lm_tone_score|score_difference|absolute_difference,0,,,{},{},insufficient_sample_size
+ar_10d,finbert_score|lm_tone_score|score_difference|absolute_difference,0,,,{},{},insufficient_sample_size

@@ -1,0 +1,2 @@
+transcript_id,ticker,total_tokens,uncertainty_count,uncertainty_ratio,topic_cash_debt_capital,topic_cost_expense,topic_guidance_outlook,topic_margin_profitability,topic_product_customer,topic_revenue_growth,topic_risk_uncertainty,top_5_keywords
+AAPL_20201029,AAPL,8199,46,0.00561,13,14,86,42,142,86,15,"quarter,iphone,year,apple,services"

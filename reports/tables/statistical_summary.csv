@@ -1,0 +1,9 @@
+metric,value
+row_count,1
+column_count,44
+ticker_count,1
+available_sentiment_columns,finbert_score|lm_tone_score|score_difference|absolute_difference
+available_return_columns,return_1d|ar_1d|return_2d|ar_2d|return_3d|ar_3d|return_5d|ar_5d|return_10d|ar_10d
+missing_value_count,2
+directional_agreement_rate,1.0
+divergence_rate,0.0

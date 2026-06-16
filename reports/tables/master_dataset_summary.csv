@@ -1,0 +1,8 @@
+metric,value
+row_count,1.0
+column_count,44.0
+unique_transcript_id_count,1.0
+duplicate_transcript_id_count,0.0
+ticker_count,1.0
+directional_agreement_rate,1.0
+divergence_rate,0.0

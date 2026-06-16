@@ -1,0 +1,8 @@
+transcript_id,ticker,topic,count,ratio
+AAPL_20201029,AAPL,revenue_growth,86,0.010489
+AAPL_20201029,AAPL,margin_profitability,42,0.005123
+AAPL_20201029,AAPL,guidance_outlook,86,0.010489
+AAPL_20201029,AAPL,risk_uncertainty,15,0.001829
+AAPL_20201029,AAPL,cost_expense,14,0.001708
+AAPL_20201029,AAPL,product_customer,142,0.017319
+AAPL_20201029,AAPL,cash_debt_capital,13,0.001586

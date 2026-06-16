@@ -1,0 +1,62 @@
+category,item,message
+sample_size,master_dataset,"n=1; correlations, regressions, and t-tests will be skipped where underpowered."
+correlation,finbert_score__return_1d,Skipped correlation for finbert_score__return_1d; n=1 < 2.
+correlation,finbert_score__ar_1d,Skipped correlation for finbert_score__ar_1d; n=1 < 2.
+correlation,finbert_score__return_2d,Skipped correlation for finbert_score__return_2d; n=1 < 2.
+correlation,finbert_score__ar_2d,Skipped correlation for finbert_score__ar_2d; n=1 < 2.
+correlation,finbert_score__return_3d,Skipped correlation for finbert_score__return_3d; n=1 < 2.
+correlation,finbert_score__ar_3d,Skipped correlation for finbert_score__ar_3d; n=1 < 2.
+correlation,finbert_score__return_5d,Skipped correlation for finbert_score__return_5d; n=1 < 2.
+correlation,finbert_score__ar_5d,Skipped correlation for finbert_score__ar_5d; n=1 < 2.
+correlation,finbert_score__return_10d,Skipped correlation for finbert_score__return_10d; n=0 < 2.
+correlation,finbert_score__ar_10d,Skipped correlation for finbert_score__ar_10d; n=0 < 2.
+correlation,lm_tone_score__return_1d,Skipped correlation for lm_tone_score__return_1d; n=1 < 2.
+correlation,lm_tone_score__ar_1d,Skipped correlation for lm_tone_score__ar_1d; n=1 < 2.
+correlation,lm_tone_score__return_2d,Skipped correlation for lm_tone_score__return_2d; n=1 < 2.
+correlation,lm_tone_score__ar_2d,Skipped correlation for lm_tone_score__ar_2d; n=1 < 2.
+correlation,lm_tone_score__return_3d,Skipped correlation for lm_tone_score__return_3d; n=1 < 2.
+correlation,lm_tone_score__ar_3d,Skipped correlation for lm_tone_score__ar_3d; n=1 < 2.
+correlation,lm_tone_score__return_5d,Skipped correlation for lm_tone_score__return_5d; n=1 < 2.
+correlation,lm_tone_score__ar_5d,Skipped correlation for lm_tone_score__ar_5d; n=1 < 2.
+correlation,lm_tone_score__return_10d,Skipped correlation for lm_tone_score__return_10d; n=0 < 2.
+correlation,lm_tone_score__ar_10d,Skipped correlation for lm_tone_score__ar_10d; n=0 < 2.
+correlation,score_difference__return_1d,Skipped correlation for score_difference__return_1d; n=1 < 2.
+correlation,score_difference__ar_1d,Skipped correlation for score_difference__ar_1d; n=1 < 2.
+correlation,score_difference__return_2d,Skipped correlation for score_difference__return_2d; n=1 < 2.
+correlation,score_difference__ar_2d,Skipped correlation for score_difference__ar_2d; n=1 < 2.
+correlation,score_difference__return_3d,Skipped correlation for score_difference__return_3d; n=1 < 2.
+correlation,score_difference__ar_3d,Skipped correlation for score_difference__ar_3d; n=1 < 2.
+correlation,score_difference__return_5d,Skipped correlation for score_difference__return_5d; n=1 < 2.
+correlation,score_difference__ar_5d,Skipped correlation for score_difference__ar_5d; n=1 < 2.
+correlation,score_difference__return_10d,Skipped correlation for score_difference__return_10d; n=0 < 2.
+correlation,score_difference__ar_10d,Skipped correlation for score_difference__ar_10d; n=0 < 2.
+correlation,absolute_difference__return_1d,Skipped correlation for absolute_difference__return_1d; n=1 < 2.
+correlation,absolute_difference__ar_1d,Skipped correlation for absolute_difference__ar_1d; n=1 < 2.
+correlation,absolute_difference__return_2d,Skipped correlation for absolute_difference__return_2d; n=1 < 2.
+correlation,absolute_difference__ar_2d,Skipped correlation for absolute_difference__ar_2d; n=1 < 2.
+correlation,absolute_difference__return_3d,Skipped correlation for absolute_difference__return_3d; n=1 < 2.
+correlation,absolute_difference__ar_3d,Skipped correlation for absolute_difference__ar_3d; n=1 < 2.
+correlation,absolute_difference__return_5d,Skipped correlation for absolute_difference__return_5d; n=1 < 2.
+correlation,absolute_difference__ar_5d,Skipped correlation for absolute_difference__ar_5d; n=1 < 2.
+correlation,absolute_difference__return_10d,Skipped correlation for absolute_difference__return_10d; n=0 < 2.
+correlation,absolute_difference__ar_10d,Skipped correlation for absolute_difference__ar_10d; n=0 < 2.
+regression,return_1d,Skipped regression for return_1d; n=1 < features+2 (6).
+regression,ar_1d,Skipped regression for ar_1d; n=1 < features+2 (6).
+regression,return_2d,Skipped regression for return_2d; n=1 < features+2 (6).
+regression,ar_2d,Skipped regression for ar_2d; n=1 < features+2 (6).
+regression,return_3d,Skipped regression for return_3d; n=1 < features+2 (6).
+regression,ar_3d,Skipped regression for ar_3d; n=1 < features+2 (6).
+regression,return_5d,Skipped regression for return_5d; n=1 < features+2 (6).
+regression,ar_5d,Skipped regression for ar_5d; n=1 < features+2 (6).
+regression,return_10d,Skipped regression for return_10d; n=0 < features+2 (6).
+regression,ar_10d,Skipped regression for ar_10d; n=0 < features+2 (6).
+t_test,return_1d,Skipped t-test for return_1d; positive_n=1 and negative_n=0 must both be at least 2.
+t_test,ar_1d,Skipped t-test for ar_1d; positive_n=1 and negative_n=0 must both be at least 2.
+t_test,return_2d,Skipped t-test for return_2d; positive_n=1 and negative_n=0 must both be at least 2.
+t_test,ar_2d,Skipped t-test for ar_2d; positive_n=1 and negative_n=0 must both be at least 2.
+t_test,return_3d,Skipped t-test for return_3d; positive_n=1 and negative_n=0 must both be at least 2.
+t_test,ar_3d,Skipped t-test for ar_3d; positive_n=1 and negative_n=0 must both be at least 2.
+t_test,return_5d,Skipped t-test for return_5d; positive_n=1 and negative_n=0 must both be at least 2.
+t_test,ar_5d,Skipped t-test for ar_5d; positive_n=1 and negative_n=0 must both be at least 2.
+t_test,return_10d,Skipped t-test for return_10d; positive_n=0 and negative_n=0 must both be at least 2.
+t_test,ar_10d,Skipped t-test for ar_10d; positive_n=0 and negative_n=0 must both be at least 2.

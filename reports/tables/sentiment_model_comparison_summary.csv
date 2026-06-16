@@ -1,0 +1,6 @@
+metric,value
+observation_count,1.0
+finbert_mean,0.4324489356025076
+lm_tone_mean,0.49211241419665436
+finbert_lm_correlation,
+label_agreement_rate,1.0

@@ -1,0 +1,10 @@
+target_column,model_name,n_observations,n_features,accuracy,precision,recall,f1,roc_auc,status
+target_positive_ar_1d,logistic_regression,1,25,,,,,,insufficient_sample_size
+target_positive_ar_1d,random_forest,1,25,,,,,,insufficient_sample_size
+target_positive_ar_1d,xgboost,1,25,,,,,,insufficient_sample_size
+target_positive_ar_3d,logistic_regression,1,25,,,,,,insufficient_sample_size
+target_positive_ar_3d,random_forest,1,25,,,,,,insufficient_sample_size
+target_positive_ar_3d,xgboost,1,25,,,,,,insufficient_sample_size
+target_positive_return_1d,logistic_regression,1,25,,,,,,insufficient_sample_size
+target_positive_return_1d,random_forest,1,25,,,,,,insufficient_sample_size
+target_positive_return_1d,xgboost,1,25,,,,,,insufficient_sample_size
