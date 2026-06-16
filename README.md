@@ -176,7 +176,3 @@ Add dashboard screenshot here: reports/screenshots/dashboard_overview.png
 - Expand speaker-role attribution and Q&A-specific analysis.
 - Add confidence intervals and stronger event-study diagnostics with larger data.
 - Deploy the Streamlit dashboard with a reproducible artifact bundle.
-
-## Resume / GitHub Positioning
-
-This project demonstrates end-to-end financial NLP engineering: text preprocessing, transformer sentiment, explainable baseline comparison, event-study integration, guarded statistics, ML-readiness, production-style dashboarding, tests, repo health checks, and honest communication of data limitations.
