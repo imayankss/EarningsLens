@@ -1,0 +1,656 @@
+# =============================================================================
+# configs/event_study_config.yaml
+# =============================================================================
+# Production configuration for the DAY 6 Event-Study Pipeline.
+#
+# Covers:
+#   - Data paths and I/O
+#   - Event window generation
+#   - Abnormal return computation
+#   - Cumulative abnormal return (CAR) calculation
+#   - Sentiment merge settings
+#   - Validation thresholds and strictness
+#   - Statistical analysis parameters
+#   - Export formats and overwrite behavior
+#   - Logging verbosity
+#   - Runtime / concurrency controls
+#   - Appendices: alternative benchmarks, factor models, research toggles
+#
+# Naming conventions:
+#   - All paths are relative to the project root unless prefixed with "/"
+#   - All return and CAR values are in decimal form  (0.05 = 5%)
+#   - Horizon integers represent POST-EVENT trading sessions
+#
+# Python loading example:
+#   import yaml
+#   with open("configs/event_study_config.yaml") as f:
+#       cfg = yaml.safe_load(f)
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# SECTION 1 — PATHS
+# Defines all input, interim, and output data locations.
+# Paths are relative to the project root.
+# -----------------------------------------------------------------------------
+paths:
+
+  # Raw data inputs
+  raw:
+    market_dir:           data/raw/market          # Per-ticker OHLCV parquet files
+    benchmark_file:       data/raw/market/benchmark_SP500.parquet
+
+  # Intermediate pipeline outputs (never overwrite raw)
+  interim:
+    transcript_metadata:  data/interim/transcript_metadata.parquet
+    aligned_events:       data/interim/aligned_events.parquet
+    benchmark_returns:    data/interim/benchmark_returns.parquet
+    event_windows:        data/interim/aligned_event_windows.parquet
+    abnormal_returns:     data/interim/abnormal_returns.parquet
+    car_metrics:          data/interim/car_metrics.parquet
+
+  # Processed inputs — sentiment pipeline outputs consumed here
+  processed_inputs:
+    market_data:          data/processed/market_data.parquet
+    call_sentiment:       data/processed/call_level_sentiment.parquet
+    lm_scores:            data/processed/lm_scores.parquet
+
+  # Final event-study outputs
+  processed:
+    event_study_parquet:  data/processed/event_study.parquet
+    event_study_csv:      data/processed/event_study.csv
+    validation_report:    data/processed/validation_report.parquet
+
+  # Logs
+  logs:
+    pipeline_log:         logs/event_study_pipeline.log
+    validation_log:       logs/event_study_validation.log
+
+
+# -----------------------------------------------------------------------------
+# SECTION 2 — EVENT WINDOWS
+# Controls how trading-session windows are generated around each earnings event.
+# Consumed by: event_window_generator.py
+# -----------------------------------------------------------------------------
+event_windows:
+
+  # Number of valid NYSE trading sessions to include BEFORE the event (t=0)
+  # Used for: rolling-feature warm-up, pre-event benchmark period
+  pre_event_days: 10
+
+  # Number of valid NYSE trading sessions to include AFTER the event (t=0)
+  # Must be >= max(car.horizons) to ensure all CAR windows have data
+  post_event_days: 5
+
+  # Include the event session itself (relative_day == 0) in the window
+  # Set False only if event-day returns are systematically noisy
+  include_event_day: true
+
+  # Minimum post-event sessions required for a window to be "complete"
+  # Events below this threshold are flagged as incomplete
+  # null = defaults to post_event_days (strict completeness)
+  min_required_post_days: 5
+
+  # Minimum pre-event sessions required for a window to be "complete"
+  # null = defaults to pre_event_days (strict completeness)
+  min_required_pre_days: 10
+
+  # Trading calendar to use for session resolution
+  # Supported: "NYSE"  |  future: "NASDAQ", "LSE", "TSX"
+  calendar: NYSE
+
+  # When resolving an earnings date that falls on a non-trading day
+  # (weekend or holiday), snap to:
+  #   "next"  — next valid trading session  (standard for after-hours releases)
+  #   "prev"  — previous valid trading session
+  after_hours_alignment: next
+
+  # NaN policy for relative_day attachment on merged market data
+  # "skip"  — leave NaN days out of ordering logic
+  # "zero"  — treat NaN relative_days as 0
+  nan_relative_day_policy: skip
+
+
+# -----------------------------------------------------------------------------
+# SECTION 3 — ABNORMAL RETURNS
+# Controls market-adjusted return computation.
+# Consumed by: abnormal_returns.py
+# -----------------------------------------------------------------------------
+abnormal_returns:
+
+  # Market-adjustment model
+  # "market_adjusted"  — AR_t = R_stock,t - R_benchmark,t  (this project)
+  # "mean_adjusted"    — future extension
+  # "ols_market"       — future extension (requires estimation window)
+  model: market_adjusted
+
+  # Primary benchmark for market adjustment
+  # See appendix.benchmarks for alternatives
+  benchmark_ticker: "^GSPC"
+
+  # Post-event return horizons (in trading sessions) to compute
+  # Each value N produces columns: return_Nd, abnormal_return_Nd
+  horizons:
+    - 1    # return_1d  /  abnormal_return_1d  — immediate reaction
+    - 3    # return_3d  /  abnormal_return_3d  — short-term adjustment
+    - 5    # return_5d  /  abnormal_return_5d  — earnings digestion
+
+  # Column names for output (must align with horizons list above)
+  output_columns:
+    daily_return:         daily_return
+    benchmark_return:     benchmark_return
+    return_1d:            return_1d
+    return_3d:            return_3d
+    return_5d:            return_5d
+    abnormal_return_1d:   abnormal_return_1d
+    abnormal_return_3d:   abnormal_return_3d
+    abnormal_return_5d:   abnormal_return_5d
+
+  # Use adjusted close price for all return calculations
+  # Required for dividend and split correctness
+  use_adjusted_close: true
+
+  # Return compounding method
+  # "compound"  — R(t,n) = prod(1+r_i) - 1  (finance-correct, recommended)
+  # "simple"    — R(t,n) = sum(r_i)          (faster, less accurate)
+  compounding: compound
+
+  # Cap applied during extreme-value validation
+  # |daily_return| or |abnormal_return| above this value is flagged
+  extreme_return_cap: 1.0    # 100% — flags data errors, not genuine moves
+
+  # How to handle NaN daily returns within a multi-day return window
+  # "skip"  — exclude NaN days from product/sum
+  # "zero"  — treat NaN as 0.0
+  # "raise" — raise ValueError on any NaN
+  nan_policy: skip
+
+
+# -----------------------------------------------------------------------------
+# SECTION 4 — CAR
+# Controls cumulative abnormal return computation.
+# Consumed by: car_calculator.py
+# -----------------------------------------------------------------------------
+car:
+
+  # Post-event CAR horizons (in trading sessions)
+  # Each value N produces column: car_Nd
+  horizons:
+    - 3    # car_3d — short-term cumulative reaction
+    - 5    # car_5d — extended cumulative reaction
+
+  # Output column names (must align with horizons above)
+  output_columns:
+    car_3d: car_3d
+    car_5d: car_5d
+
+  # CAR formula: "sum"  — CAR = Σ AR_t  (standard event-study, used here)
+  # Future: "compound" — CAR = prod(1+AR_t) - 1
+  formula: sum
+
+  # Include the event day (relative_day == 0) in the CAR cumulative sum
+  # False = CAR starts at t=1 (recommended — event-day return is ambiguous
+  # for after-hours earnings releases)
+  include_event_day_in_car: false
+
+  # Minimum number of valid (non-NaN) post-event AR observations required
+  # to produce a non-NaN CAR for a given horizon
+  min_post_days_required: 1
+
+  # NaN policy for missing abnormal returns within CAR window
+  # "skip"  — nansum across available days  (recommended)
+  # "zero"  — replace NaN with 0.0 before summing
+  # "raise" — raise ValueError on NaN
+  nan_policy: skip
+
+  # Absolute CAR threshold above which a value is flagged as extreme
+  extreme_car_threshold: 1.0    # 100%
+
+
+# -----------------------------------------------------------------------------
+# SECTION 5 — SENTIMENT MERGE
+# Controls how NLP sentiment outputs are joined to the event-study frame.
+# Consumed by: sentiment_event_merger.py
+# -----------------------------------------------------------------------------
+sentiment_merge:
+
+  # Primary join key between transcript metadata and sentiment outputs
+  merge_key: transcript_id
+
+  # Merge strategy
+  # "inner" — keep only events present in both datasets (recommended)
+  # "left"  — keep all market events; NaN sentiment for unmatched
+  how: inner
+
+  # Sentiment input column names (as produced by FinBERT / LM pipeline)
+  input_columns:
+    finbert_score:    finbert_sentiment_score
+    lm_score:         lm_tone_score
+    sentiment_label:  sentiment_label
+
+  # Output column names in the final merged dataset
+  output_columns:
+    finbert_score:    finbert_sentiment_score
+    lm_score:         lm_tone_score
+    sentiment_label:  sentiment_label
+
+  # Expected sentiment label vocabulary
+  # Used for validation — any value outside this set triggers a WARNING
+  expected_sentiment_labels:
+    - positive
+    - negative
+    - neutral
+
+  # Expected score range for both FinBERT and LM scores
+  # Scores outside [score_min, score_max] trigger a WARNING
+  score_min: -1.0
+  score_max:  1.0
+
+  # Drop events with missing sentiment scores before export
+  # true  = strict (all events must have sentiment — recommended for modeling)
+  # false = allow NaN sentiment in output (for exploratory analysis)
+  drop_missing_sentiment: false
+
+  # Log unmatched transcript_ids at this level
+  # "warning" | "error" | "info"
+  unmatched_log_level: warning
+
+
+# -----------------------------------------------------------------------------
+# SECTION 6 — VALIDATION
+# Thresholds and strictness controls for EventStudyValidator.
+# Consumed by: validation.py
+# -----------------------------------------------------------------------------
+validation:
+
+  # Activate strict mode: all WARNING-level issues are promoted to CRITICAL
+  # Recommended: false for development, true for production CI/CD gates
+  strict_mode: false
+
+  # Fraction of null values in any column that triggers a WARNING
+  null_rate_warning_threshold: 0.05     # 5%
+
+  # Fraction of null values in any column that triggers a CRITICAL issue
+  null_rate_critical_threshold: 0.20    # 20%
+
+  # Minimum fraction of events that must have complete windows / valid CAR
+  # Events below this rate trigger a CRITICAL issue
+  min_event_coverage: 0.80              # 80%
+
+  # Maximum fraction of rows allowed to have extreme return values
+  # before a CRITICAL issue is raised
+  max_extreme_return_rate: 0.02         # 2%
+
+  # Absolute return cap for extreme-value detection
+  return_cap: 1.0                       # 100%
+
+  # Absolute CAR cap for extreme-value detection
+  car_cap: 1.0                          # 100%
+
+  # Post-event relative days that every event must have present
+  # Events missing any of these days are flagged as incomplete
+  required_post_horizons:
+    - 1
+    - 3
+    - 5
+
+  # Require exactly one relative_day == 0 row per event
+  require_event_day_row: true
+
+  # Halt the pipeline on the first CRITICAL validation failure
+  # false = collect all errors and report at end (recommended)
+  fail_fast: false
+
+  # Write validation report to disk after each stage
+  write_validation_report: true
+
+  # Validation report format: "parquet" | "csv" | "json"
+  report_format: parquet
+
+
+# -----------------------------------------------------------------------------
+# SECTION 7 — STATISTICS
+# Parameters for statistical analysis utilities.
+# Consumed by: statistics_utils.py
+# Prepares the pipeline for Day 7–9 regression and hypothesis testing.
+# -----------------------------------------------------------------------------
+statistics:
+
+  # Significance level for hypothesis tests
+  alpha: 0.05
+
+  # Two-sided t-test by default; set to "less" or "greater" for one-sided
+  t_test_alternative: two-sided
+
+  # Minimum number of events required to run a t-test
+  # Groups below this size are excluded from significance testing
+  min_group_size: 10
+
+  # CAR bucketing for sentiment-group comparison
+  # Events are split into sentiment_label buckets and CAR distributions compared
+  sentiment_buckets:
+    - positive
+    - neutral
+    - negative
+
+  # CAR horizons to include in group comparison tables
+  car_analysis_horizons:
+    - 3
+    - 5
+
+  # Rolling window for event-level volatility (pre-event standard deviation)
+  # Used as a risk control variable in regressions
+  rolling_volatility_window: 20        # trading sessions
+
+  # Winsorize extreme CAR values before regression
+  # null = no winsorization
+  # 0.01 = winsorize at 1st/99th percentile
+  winsorize_percentile: 0.01
+
+  # Include intercept in OLS regressions
+  regression_include_intercept: true
+
+  # Cluster standard errors by ticker in panel regressions
+  cluster_standard_errors: true
+  cluster_variable: ticker
+
+
+# -----------------------------------------------------------------------------
+# SECTION 8 — EXPORTS
+# Controls output serialization behavior.
+# -----------------------------------------------------------------------------
+exports:
+
+  # File formats to write for final pipeline outputs
+  # Parquet is required for downstream pipeline speed; CSV for debugging
+  write_parquet: true
+  write_csv:     true
+
+  # Overwrite existing output files
+  # false = raise FileExistsError if output already present (safe default)
+  # true  = silently overwrite (use with care in production)
+  overwrite: false
+
+  # Parquet engine: "pyarrow" (recommended) | "fastparquet"
+  parquet_engine: pyarrow
+
+  # Parquet compression codec: "snappy" | "gzip" | "brotli" | "zstd" | null
+  parquet_compression: snappy
+
+  # CSV encoding
+  csv_encoding: utf-8
+
+  # CSV separator
+  csv_separator: ","
+
+  # Write an index column to CSV output
+  csv_index: false
+
+  # Partition parquet output by ticker (useful for large datasets)
+  # true  = write partitioned parquet dataset at data/processed/event_study/
+  # false = write single parquet file (recommended for datasets < 5 GB)
+  parquet_partition_by_ticker: false
+
+  # Columns to include in the final export
+  # "all"         = include every computed column
+  # list of names = include only the listed columns
+  final_columns: all
+
+
+# -----------------------------------------------------------------------------
+# SECTION 9 — LOGGING
+# Verbosity and handler configuration.
+# -----------------------------------------------------------------------------
+logging:
+
+  # Root log level for the event-study pipeline modules
+  # "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL"
+  level: INFO
+
+  # Per-module overrides (module path → level string)
+  module_levels:
+    src.event_study.event_window_generator: INFO
+    src.event_study.abnormal_returns:       INFO
+    src.event_study.car_calculator:         INFO
+    src.event_study.sentiment_event_merger: INFO
+    src.event_study.validation:             INFO
+    src.event_study.event_study:            INFO
+    src.finance.trading_calendar:           WARNING
+    src.finance.market_data_loader:         WARNING
+
+  # Write logs to the paths defined in paths.logs
+  write_to_file: true
+
+  # Log format string (Python logging syntax)
+  format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+
+  # ISO 8601 timestamps in logs
+  datefmt: "%Y-%m-%dT%H:%M:%S"
+
+  # Rotate log files
+  # "none"    = no rotation
+  # "size"    = rotate when file exceeds max_bytes
+  # "time"    = rotate daily
+  rotation: size
+  max_bytes: 10485760       # 10 MB
+  backup_count: 5
+
+
+# -----------------------------------------------------------------------------
+# SECTION 10 — RUNTIME
+# Concurrency, caching, and reproducibility controls.
+# -----------------------------------------------------------------------------
+runtime:
+
+  # Random seed for any stochastic operations (bootstrapping, sampling)
+  random_seed: 42
+
+  # Maximum number of parallel workers for grouped operations
+  # 1 = single-threaded (deterministic; recommended for debugging)
+  # -1 = use all available CPU cores
+  n_jobs: 1
+
+  # Cache expensive intermediate computations to disk
+  # true  = skip recomputation if interim files already exist
+  # false = always recompute from scratch (safe default)
+  use_cache: false
+
+  # Cache directory (used only when use_cache: true)
+  cache_dir: data/cache/event_study
+
+  # Chunk size for processing large ticker batches in the market-data loader
+  # Reduce if hitting memory limits
+  ticker_chunk_size: 50
+
+  # yfinance rate-limit retry settings (inherited from market_data_loader)
+  yfinance_retry_count: 3
+  yfinance_retry_delay_seconds: 2.0
+
+  # Maximum calendar days to search forward/backward when aligning event dates
+  # to valid trading sessions (prevents infinite loops on corrupt dates)
+  max_alignment_search_days: 10
+
+  # Pipeline execution mode
+  # "full"        = run all stages from scratch
+  # "incremental" = skip stages whose outputs already exist on disk
+  execution_mode: full
+
+
+# =============================================================================
+# APPENDIX A — ALTERNATIVE BENCHMARKS
+# Additional benchmark configurations for sensitivity analysis.
+# To activate: replace abnormal_returns.benchmark_ticker with one of these.
+# =============================================================================
+appendix:
+  benchmarks:
+
+    sp500_etf:
+      ticker: SPY
+      description: >
+        S&P 500 ETF — tracks ^GSPC with tighter intraday liquidity.
+        Suitable substitute when ^GSPC index data is unavailable.
+
+    nasdaq_composite:
+      ticker: "^IXIC"
+      description: >
+        NASDAQ Composite — better benchmark for technology-sector earnings.
+
+    russell_2000:
+      ticker: "^RUT"
+      description: >
+        Russell 2000 — appropriate for small-cap earnings event studies.
+
+    equal_weighted_sp500:
+      ticker: RSP
+      description: >
+        Invesco S&P 500 Equal Weight ETF — removes mega-cap concentration
+        bias from the benchmark.
+
+    sector_etfs:
+      description: >
+        Sector-specific benchmarks for within-sector abnormal return analysis.
+        Requires sector classification in transcript metadata.
+      technology:     XLK
+      financials:     XLF
+      healthcare:     XLV
+      consumer_disc:  XLY
+      industrials:    XLI
+      energy:         XLE
+      utilities:      XLU
+      materials:      XLB
+      real_estate:    XLRE
+      comm_services:  XLC
+
+
+# =============================================================================
+# APPENDIX B — FUTURE FACTOR MODEL SUPPORT
+# Configuration stubs for multi-factor abnormal return models.
+# All entries are disabled by default (enabled: false).
+# Activate by setting enabled: true and providing required data paths.
+# =============================================================================
+  factor_models:
+
+    fama_french_3:
+      enabled: false
+      description: >
+        Fama-French 3-factor model (MKT-RF, SMB, HML).
+        Requires estimation window of 120–250 trading days pre-event.
+      data_path:    data/external/fama_french_3_factors.csv
+      estimation_window_days: 200
+      factors:
+        - MKT-RF
+        - SMB
+        - HML
+
+    fama_french_5:
+      enabled: false
+      description: >
+        Fama-French 5-factor model (adds RMW, CMA to 3-factor).
+      data_path:    data/external/fama_french_5_factors.csv
+      estimation_window_days: 200
+      factors:
+        - MKT-RF
+        - SMB
+        - HML
+        - RMW
+        - CMA
+
+    carhart_4:
+      enabled: false
+      description: >
+        Carhart 4-factor model (Fama-French 3 + MOM momentum factor).
+      data_path:    data/external/carhart_4_factors.csv
+      estimation_window_days: 200
+      factors:
+        - MKT-RF
+        - SMB
+        - HML
+        - MOM
+
+    q_factor:
+      enabled: false
+      description: >
+        Hou-Xue-Zhang q-factor model (MKT, ME, IA, ROE).
+      data_path:    data/external/q_factors.csv
+      estimation_window_days: 200
+      factors:
+        - MKT
+        - ME
+        - IA
+        - ROE
+
+
+# =============================================================================
+# APPENDIX C — ADVANCED RESEARCH TOGGLES
+# Experimental and sensitivity-analysis features.
+# All disabled by default.  Enable only in controlled research contexts.
+# =============================================================================
+  research_toggles:
+
+    # Intraday event-time alignment
+    # Requires intraday price data; not supported by default yfinance daily pull
+    intraday_alignment:
+      enabled: false
+      description: >
+        Align event windows to the precise intraday announcement timestamp
+        rather than the trading-day session.  Requires minute-level OHLCV.
+
+    # Earnings surprise integration
+    # Adds analyst-estimate surprise (actual EPS - consensus EPS) as a
+    # control variable in regression analysis
+    earnings_surprise:
+      enabled: false
+      description: >
+        Merge analyst consensus EPS estimates and compute earnings surprise.
+        Requires external data source (e.g. Refinitiv, Bloomberg, Zacks).
+      data_path:    data/external/earnings_estimates.parquet
+      eps_actual_col:    eps_actual
+      eps_estimate_col:  eps_consensus
+      surprise_col:      earnings_surprise
+
+    # Bootstrap confidence intervals for CAR
+    bootstrap_car_ci:
+      enabled: false
+      description: >
+        Compute bootstrap confidence intervals for CAR bucket means.
+        Computationally expensive; use only on final analysis datasets.
+      n_bootstrap_samples: 5000
+      confidence_level: 0.95
+      random_seed: 42
+
+    # Placebo / pseudo-event test
+    # Runs the full event-study pipeline on randomly assigned event dates
+    # to verify that sentiment has no spurious predictive power
+    placebo_test:
+      enabled: false
+      description: >
+        Shuffle event dates within each ticker to generate null-hypothesis
+        CAR distributions.  Confirms that observed CAR-sentiment correlations
+        are not driven by calendar or sector effects.
+      n_placebo_iterations: 500
+      random_seed: 42
+
+    # Long-horizon drift analysis
+    # Extends post-event window to 20 / 60 trading days
+    # Tests for post-earnings announcement drift (PEAD)
+    long_horizon_drift:
+      enabled: false
+      description: >
+        Compute CAR over 20-day and 60-day post-event windows to test
+        for post-earnings announcement drift (PEAD).
+      additional_horizons:
+        - 20    # car_20d — ~1 calendar month
+        - 60    # car_60d — ~3 calendar months
+
+    # Sub-section analysis
+    # Runs the event study separately on prepared_remarks and qa sections
+    section_level_event_study:
+      enabled: false
+      description: >
+        Split sentiment scores by transcript section (prepared_remarks, qa)
+        and test whether Q&A sentiment provides incremental predictive power
+        above and beyond prepared-remarks sentiment.
+      sections:
+        - prepared_remarks
+        - qa
+        - closing_remarks

@@ -1,0 +1,562 @@
+# =============================================================================
+# lm_config.yaml
+# =============================================================================
+# Loughran-McDonald Explainable Sentiment Pipeline — Master Configuration
+#
+# Covers all pipeline stages:
+#   dictionary → preprocessing → matching → scoring → aggregation →
+#   validation → export → logging → pipeline control → diagnostics
+#
+# Design principles:
+#   - Conservative defaults optimised for financial NLP research correctness
+#   - Every threshold is explicitly named and commented
+#   - All paths are relative to the project root unless prefixed with "/"
+#   - Override any section via environment-specific config overlays
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. DICTIONARY
+# Governs loading and caching of the Loughran-McDonald master dictionary CSV.
+# Download the master dictionary from:
+#   https://sraf.nd.edu/loughranmcdonald-master-dictionary/
+# -----------------------------------------------------------------------------
+dictionary:
+
+  # Path to the directory containing the LM master dictionary CSV.
+  # Relative to project root.
+  dictionary_dir: data/dictionaries/loughran_mcdonald
+
+  # Filename of the LM master dictionary CSV within dictionary_dir.
+  filename: lm_master_dictionary.csv
+
+  # CSV field delimiter (official LM releases use comma).
+  csv_delimiter: ","
+
+  # File encoding. Official LM releases ship as UTF-8; older releases
+  # may require "latin-1".
+  encoding: utf-8
+
+  # Column name in the CSV that holds the word/term.
+  word_column: Word
+
+  # Mapping from canonical LM category names to CSV column names.
+  # Override only if your CSV release uses non-standard headers.
+  column_map:
+    Positive:     Positive
+    Negative:     Negative
+    Uncertainty:  Uncertainty
+    Litigious:    Litigious
+    StrongModal:  StrongModal
+    WeakModal:    WeakModal
+    Constraining: Constraining
+
+  # Categories to load. Comment out any category to exclude it.
+  # All seven are required for the full explainability baseline.
+  required_categories:
+    - Positive
+    - Negative
+    - Uncertainty
+    - Litigious
+    - StrongModal
+    - WeakModal
+    - Constraining
+
+  # Cache the processed LMDictionary object in memory for the process
+  # lifetime. Disabling forces a fresh CSV read on every pipeline run.
+  cache_enabled: true
+
+  # Force re-read from CSV even when an in-process cache entry exists.
+  # Useful during dictionary updates or CI validation runs.
+  force_reload: false
+
+  # Raise ValueError on any validation error during dictionary loading.
+  # Set to false in production to log errors without aborting.
+  strict_validation: false
+
+  # Minimum number of terms expected per category after loading.
+  # Pipeline will emit a WARNING if a category falls below this count.
+  min_terms_per_category: 50
+
+
+# -----------------------------------------------------------------------------
+# 2. PREPROCESSING
+# Controls how raw transcript text is normalised before dictionary matching.
+# Preprocessing must be deterministic: same input → same token list every run.
+# NOTE: heavy normalisation (stemming / lemmatisation) is intentionally OFF
+# by default. The LM dictionary was built on uninflected financial vocabulary;
+# aggressive stemming degrades match precision.
+# -----------------------------------------------------------------------------
+preprocessing:
+
+  # Convert all text to lowercase before tokenisation.
+  # Must match the normalisation applied when the dictionary was built.
+  lowercase: true
+
+  # Apply Unicode NFC normalisation to remove encoding artefacts.
+  normalize_unicode: true
+
+  # Strip punctuation characters before tokenisation.
+  # Preserves hyphenated financial terms when preserve_hyphens is true.
+  remove_punctuation: true
+
+  # Preserve hyphens within tokens (e.g. "year-over-year").
+  # Only applies when remove_punctuation is true.
+  preserve_hyphens: false
+
+  # Remove common English stopwords before matching.
+  # Recommended: false. Stopwords may carry LM modal/constraining signal.
+  remove_stopwords: false
+
+  # Apply Porter/Snowball stemming before matching.
+  # Recommended: false for LM dictionary (uninflected form matching).
+  stemming_enabled: false
+
+  # Apply lemmatisation before matching (requires spaCy or NLTK WordNet).
+  # Recommended: false unless a lemmatised LM variant is loaded.
+  lemmatization_enabled: false
+
+  # Preserve stock ticker symbols as single tokens (e.g. AAPL, NVDA).
+  # Prevents tickers from being split or lowercased incorrectly.
+  preserve_tickers: true
+
+  # Preserve numeric tokens (e.g. percentages, dollar amounts).
+  # These will not match LM vocabulary but contribute to token_count.
+  preserve_numbers: true
+
+  # Minimum token length (characters) to retain after preprocessing.
+  # Tokens shorter than this are discarded before matching.
+  # Recommended: 2. Prevents single-letter artefacts from inflating counts.
+  min_token_length: 2
+
+  # Maximum token length (characters). Tokens exceeding this are likely
+  # OCR artefacts or malformed rows; discard silently.
+  max_token_length: 60
+
+  # Sentence tokenisation library to use when splitting transcript blocks.
+  # Options: "nltk_punkt" | "spacy" | "regex"
+  # "regex" requires no external dependencies and is the safe default.
+  sentence_tokenizer: regex
+
+  # Regex pattern for sentence boundary detection (used when
+  # sentence_tokenizer is "regex"). Splits on period/!/?/; followed
+  # by whitespace or end-of-string.
+  sentence_split_pattern: '(?<=[.!?;])\s+'
+
+
+# -----------------------------------------------------------------------------
+# 3. MATCHING
+# Controls how the LMMatcher performs token→dictionary lookups.
+# -----------------------------------------------------------------------------
+matching:
+
+  # Perform case-sensitive matching.
+  # Recommended: false. The LM dictionary is stored in lowercase; setting
+  # true here requires preprocessing.lowercase to also be false, which
+  # produces zero matches. Only enable for custom case-sensitive variants.
+  case_sensitive: false
+
+  # Count each unique normalised token at most once per category per text
+  # unit (bag-of-types semantics).
+  # false = frequency counting (each occurrence counted; recommended for
+  #         LM tone score formula which uses raw counts).
+  # true  = unique counting (useful for presence/absence feature engineering).
+  unique_term_counting: false
+
+  # Alias for !unique_term_counting; kept for explicit config readability.
+  frequency_counting: true
+
+  # Store the full list of unmatched tokens in LMMatchResult.
+  # Disable for large-batch workloads to reduce memory pressure.
+  include_unmatched_terms: true
+
+  # Store (token, position) tuples in category_term_map.
+  # Enables future positional / sliding-window sentiment analysis.
+  # Disable in production batch runs unless positional features are needed.
+  preserve_token_positions: false
+
+  # Silently skip tokens that are empty, too short, or too long.
+  # When false, malformed tokens raise ValueError — useful during testing.
+  skip_malformed_tokens: true
+
+  # Active LM categories for matching.
+  # Subset of dictionary.required_categories. All seven recommended.
+  active_categories:
+    - positive
+    - negative
+    - uncertainty
+    - litigious
+    - strong_modal
+    - weak_modal
+    - constraining
+
+
+# -----------------------------------------------------------------------------
+# 4. SCORING
+# Controls LM tone score computation from raw category counts.
+#
+# Core formula:
+#   LM Tone = (Positive - Negative) / (Positive + Negative)
+#
+# All thresholds below are applied to the normalised [-1, +1] tone score.
+# -----------------------------------------------------------------------------
+scoring:
+
+  # Score threshold above which a text unit is labelled "positive".
+  positive_threshold: 0.02
+
+  # Score threshold below which a text unit is labelled "negative".
+  negative_threshold: -0.02
+
+  # Symmetric band around zero for "neutral" classification.
+  # A unit is neutral when: negative_threshold <= score <= positive_threshold.
+  neutral_band: 0.04   # = positive_threshold - negative_threshold
+
+  # Scale scores by the model's confidence proxy (coverage_ratio).
+  # When true: final_score = raw_tone * coverage_ratio.
+  # Reduces the influence of very sparsely matched text units.
+  confidence_scaling: false
+
+  # Add Laplace-style additive smoothing to positive/negative counts
+  # to avoid division-by-zero when both counts are zero.
+  smoothing_enabled: true
+
+  # Smoothing pseudo-count added to both Positive and Negative before
+  # computing the tone score. Keeps scores defined for empty matches.
+  # Recommended: 0.5 (half-count Laplace smoothing).
+  smoothing_alpha: 0.5
+
+  # Text units with a coverage ratio below this threshold receive a
+  # NaN tone score rather than a potentially noisy computed value.
+  # Set to 0.0 to disable and always compute a score.
+  minimum_coverage_ratio: 0.005
+
+  # Clip output scores to the range [score_floor, score_ceiling].
+  # Scores outside [-1, 1] indicate a logic error; hard-clip as safety net.
+  score_floor: -1.0
+  score_ceiling: 1.0
+
+  # Additional ratio metrics written alongside the tone score.
+  compute_positive_ratio: true    # Positive / total_tokens
+  compute_negative_ratio: true    # Negative / total_tokens
+  compute_uncertainty_ratio: true # Uncertainty / total_tokens
+  compute_coverage_ratio: true    # matched_tokens / total_tokens
+
+
+# -----------------------------------------------------------------------------
+# 5. AGGREGATION
+# Controls how chunk-level scores are rolled up to transcript / section /
+# speaker level. Weighting mode is the most impactful setting here.
+#
+# Available weighting modes:
+#   uniform  — each chunk contributes equally
+#   token    — weight by token_count
+#   coverage — weight by matched_token_count
+#   hybrid   — weight by token_count × coverage_ratio (recommended)
+# -----------------------------------------------------------------------------
+aggregation:
+
+  # Weighting mode used for all aggregation levels.
+  weighting_mode: hybrid
+
+  # Minimum total tokens for a group (transcript / section / speaker) to
+  # be included in aggregated output. Groups below this threshold are
+  # flagged as low-quality.
+  minimum_chunk_tokens: 10
+  minimum_transcript_tokens: 100
+  minimum_section_tokens: 50
+  minimum_speaker_tokens: 30
+
+  # Drop groups whose total token count falls below the minimum threshold.
+  # When false, low-token groups are retained but flagged with is_low_token.
+  drop_low_token_groups: false
+
+  # Minimum coverage_ratio for a group to be considered high-quality.
+  # Groups below this threshold receive is_low_coverage: true.
+  minimum_coverage_ratio: 0.01
+
+  # Exclude these speaker roles from speaker-level aggregation.
+  exclude_roles:
+    - operator
+    - unknown
+    - ""
+
+  # Section types to include in section-level aggregation.
+  # null / empty list → include all recognised sections.
+  section_types:
+    - prepared_remarks
+    - qa
+    - closing_remarks
+    - opening_remarks
+
+  # Sort all output DataFrames by their primary key for deterministic
+  # ordering across runs.
+  sort_output: true
+
+  # Sentiment label thresholds applied to mean_tone at the aggregated level.
+  # Aligns with scoring.positive_threshold / scoring.negative_threshold.
+  label_positive_threshold: 0.02
+  label_negative_threshold: -0.02
+
+  # Distribution columns to include in aggregated output.
+  include_sentiment_distribution: true   # lm_dist_positive/neutral/negative
+  include_quality_flags: true            # lm_is_low_coverage, lm_is_low_token
+
+
+# -----------------------------------------------------------------------------
+# 6. VALIDATION
+# Governs LMValidator behaviour across all pipeline stages.
+# Validation runs after every major output; the pipeline gates export
+# on validation.passed when strict_export is true (see pipeline section).
+# -----------------------------------------------------------------------------
+validation:
+
+  # Acceptable range for all tone / mean_tone scores.
+  score_min: -1.0
+  score_max: 1.0
+
+  # Maximum fraction of null values in a critical column before escalating
+  # from WARNING to ERROR.
+  max_null_ratio: 0.10
+
+  # Any NaN in a score column is immediately an ERROR (not a WARNING).
+  nan_as_error: false
+
+  # Maximum fraction of duplicate key rows before escalating from WARNING
+  # to ERROR. 0.0 means any duplicate triggers an ERROR.
+  max_duplicate_ratio: 0.0
+
+  # Coverage ratio below which rows are flagged as low-quality.
+  minimum_coverage_ratio: 0.01
+
+  # Standard deviation of tone scores above which a distribution WARNING
+  # is emitted. High std may indicate pipeline instability.
+  max_std_tone: 0.50
+
+  # Minimum chunk count per transcript group. Groups below this count
+  # receive a low_chunk_count WARNING.
+  min_chunk_count: 1
+
+  # Emit an INFO notice when a label class has zero occurrences.
+  # Useful for detecting degenerate distributions in small samples.
+  warn_on_empty_distribution: true
+
+  # Treat unknown label values as ERROR (true) vs WARNING (false).
+  strict_label_check: false
+
+  # Policy for handling duplicate rows detected during validation.
+  # Options: "warn" | "error" | "drop"
+  # "warn"  = log WARNING, keep duplicates in output
+  # "error" = log ERROR, pipeline fails if strict_export is true
+  # "drop"  = silently remove duplicates before export
+  duplicate_policy: warn
+
+  # Per-check warning thresholds (fraction of affected rows).
+  # Checks exceeding these ratios escalate to WARNING severity.
+  warning_thresholds:
+    null_ratio: 0.05
+    low_coverage_ratio: 0.20
+    out_of_range_ratio: 0.01
+
+  # Per-check error thresholds (fraction of affected rows).
+  # Checks exceeding these ratios escalate to ERROR severity.
+  error_thresholds:
+    null_ratio: 0.10
+    out_of_range_ratio: 0.05
+    duplicate_ratio: 0.0
+
+
+# -----------------------------------------------------------------------------
+# 7. EXPORT
+# Controls output file formats and destination directories.
+# All paths are relative to the project root.
+# -----------------------------------------------------------------------------
+export:
+
+  # Write output DataFrames as Parquet files.
+  # Required for pipeline inter-stage communication and analytics speed.
+  export_parquet: true
+
+  # Additionally export as CSV for human inspection and debugging.
+  export_csv: true
+
+  # Export diagnostic reports (score distributions, validation summaries).
+  export_diagnostics: true
+
+  # Overwrite existing output files on re-run.
+  # When false, the pipeline skips export if the target file already exists
+  # (resume-safe behaviour).
+  overwrite_existing: true
+
+  # Base directory for all processed LM output files.
+  processed_output_dir: data/processed/sentiment
+
+  # Base directory for diagnostic reports and validation summaries.
+  diagnostics_output_dir: data/diagnostics/lm
+
+  # Intermediate output directory (chunked data, pre-aggregation scores).
+  interim_output_dir: data/interim
+
+  # Output filenames (relative to processed_output_dir).
+  output_files:
+    chunk_scores:          lm_chunk_scores
+    transcript_scores:     lm_transcript_scores
+    section_scores:        lm_section_scores
+    speaker_scores:        lm_speaker_scores
+    diagnostics:           lm_diagnostics
+
+  # Parquet compression codec. Options: snappy | gzip | brotli | zstd | none
+  parquet_compression: snappy
+
+  # Parquet row group size. Tune for memory vs. I/O trade-off.
+  parquet_row_group_size: 50000
+
+  # CSV encoding.
+  csv_encoding: utf-8
+
+  # CSV index column written to file.
+  csv_write_index: false
+
+
+# -----------------------------------------------------------------------------
+# 8. LOGGING
+# Controls pipeline-wide logging behaviour.
+# The root logger level is set by the application entry point; these settings
+# control LM-module-specific verbosity and structured log fields.
+# -----------------------------------------------------------------------------
+logging:
+
+  # Logging level for all LM sentiment modules.
+  # Options: DEBUG | INFO | WARNING | ERROR | CRITICAL
+  level: INFO
+
+  # Log wall-clock timing for each pipeline stage.
+  log_timing: true
+
+  # Log peak memory usage (requires psutil).
+  log_memory_usage: false
+
+  # Log the full ValidationSummary after each validation run.
+  log_validation_details: true
+
+  # Log a message each time the dictionary cache is hit (avoids re-reads).
+  log_cache_hits: true
+
+  # Log per-group aggregation statistics (chunk counts, coverage, etc.).
+  log_aggregation_stats: true
+
+  # Log token-level match diagnostics (very verbose; enable only for debug).
+  log_match_details: false
+
+  # Log format string (Python logging format).
+  log_format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+
+  # Log date format.
+  log_datefmt: "%Y-%m-%d %H:%M:%S"
+
+
+# -----------------------------------------------------------------------------
+# 9. PIPELINE
+# Master pipeline control settings consumed by lm_pipeline.py.
+# -----------------------------------------------------------------------------
+pipeline:
+
+  # Number of transcript records processed per iteration in the main loop.
+  # Tune based on available memory and transcript corpus size.
+  batch_size: 64
+
+  # Number of text chunks processed per transformer / matcher batch.
+  # Smaller values use less memory; larger values improve throughput.
+  chunk_batch_size: 128
+
+  # Save intermediate outputs to disk between pipeline stages.
+  # Enables safe resume after failure without recomputing expensive stages.
+  cache_intermediate_outputs: true
+
+  # Ensure all groupby / sort operations use stable (deterministic) ordering.
+  # Disabling may improve performance but breaks reproducibility guarantees.
+  deterministic_ordering: true
+
+  # Skip pipeline stages whose output files already exist on disk.
+  # Requires overwrite_existing: false in the export section.
+  resume_safe_execution: false
+
+  # Abort the pipeline if validation.passed is false after any stage.
+  strict_export: false
+
+  # Maximum number of retries for file I/O operations (read/write).
+  io_max_retries: 3
+
+  # Seconds to wait between I/O retry attempts.
+  io_retry_delay_seconds: 2
+
+  # Pipeline stages to execute. Comment out stages to skip them.
+  # Order is fixed by the pipeline orchestrator regardless of list order here.
+  active_stages:
+    - load_dictionary
+    - load_transcripts
+    - preprocess
+    - match
+    - score
+    - aggregate_chunks
+    - aggregate_transcripts
+    - aggregate_sections
+    - aggregate_speakers
+    - validate
+    - export
+
+  # Input dataset paths consumed by lm_pipeline.py.
+  input:
+    segmented_transcripts: data/interim/segmented_transcripts.parquet
+    chunked_transcripts:   data/interim/transcript_chunks.parquet
+    finbert_scores:        data/processed/sentiment/call_level_sentiment.parquet
+
+
+# -----------------------------------------------------------------------------
+# 10. DIAGNOSTICS
+# Controls generation of distribution reports and coverage analytics.
+# All diagnostic outputs land in export.diagnostics_output_dir.
+# -----------------------------------------------------------------------------
+diagnostics:
+
+  # Generate score distribution reports (histograms, percentile tables).
+  enable_distribution_reports: true
+
+  # Number of histogram bins for tone score distribution plots.
+  distribution_histogram_bins: 20
+
+  # Percentile breakpoints computed for all score columns.
+  distribution_percentiles:
+    - 5
+    - 10
+    - 25
+    - 50
+    - 75
+    - 90
+    - 95
+
+  # Generate dictionary coverage reports per transcript / section / speaker.
+  enable_coverage_reports: true
+
+  # Minimum coverage ratio threshold used for coverage report highlighting.
+  coverage_report_min_threshold: 0.02
+
+  # Generate sentiment label distribution reports.
+  enable_label_reports: true
+
+  # Generate full validation summary reports as text files after each run.
+  enable_validation_reports: true
+
+  # Include per-category matched term frequency tables in diagnostic exports.
+  include_term_frequency_tables: false
+
+  # Top-N most frequent matched terms to include per category per transcript.
+  top_n_terms: 20
+
+  # Compare LM tone scores against FinBERT scores (when available).
+  # Computes Pearson correlation and label agreement rate.
+  enable_finbert_comparison: true
+
+  # Minimum number of transcripts required before comparison statistics
+  # are considered reliable (avoids misleading correlations on tiny samples).
+  finbert_comparison_min_transcripts: 10

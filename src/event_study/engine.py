@@ -98,7 +98,10 @@ class EventStudyEngine:
             Correlation matrix DataFrame:
                 sentiment_measure | return_window | correlation | n_observations
         """
-        sent_cols   = [c for c in ["finbert_score", "lm_tone"] if c in event_df.columns]
+        sent_cols   = [
+            c for c in ["finbert_score", "lm_tone", "lm_tone_score"]
+            if c in event_df.columns
+        ]
         return_cols = [f"ar_{w}d" for w in self.windows if f"ar_{w}d" in event_df.columns]
 
         records: list[dict] = []
@@ -128,7 +131,10 @@ class EventStudyEngine:
             if col not in event_df.columns:
                 continue
             data = event_df[col].dropna()
-            t_stat, p_val = stats.ttest_1samp(data, 0)
+            if len(data) > 1:
+                t_stat, p_val = stats.ttest_1samp(data, 0)
+            else:
+                t_stat, p_val = np.nan, np.nan
             records.append({
                 "window": f"{w}D",
                 "mean_ar": data.mean(),
@@ -155,12 +161,14 @@ class EventStudyEngine:
         if event_loc >= len(trading_dates):
             return None
 
+        lm_tone = self._extract_lm_tone(sentiment_row)
         row: dict = {
             "ticker"       : ticker,
             "event_date"   : event_date,
             "transcript_id": sentiment_row.get("transcript_id"),
             "finbert_score": sentiment_row.get("finbert_score"),
-            "lm_tone"      : sentiment_row.get("lm_tone"),
+            "lm_tone"      : lm_tone,
+            "lm_tone_score": lm_tone,
         }
 
         for w in self.windows:
@@ -185,3 +193,13 @@ class EventStudyEngine:
             row[f"ar_{w}d"]     = cum_stock - cum_market
 
         return row
+
+    @staticmethod
+    def _extract_lm_tone(sentiment_row: pd.Series) -> float:
+        """Return a numeric LM tone from legacy or modular column names."""
+        for col in ("lm_tone", "lm_tone_score", "lm_mean_tone", "lm_weighted_tone_score"):
+            if col in sentiment_row.index:
+                value = pd.to_numeric(pd.Series([sentiment_row.get(col)]), errors="coerce").iloc[0]
+                if pd.notna(value):
+                    return float(value)
+        return float("nan")

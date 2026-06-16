@@ -54,9 +54,9 @@ project:
 paths:
   # ── Input ──────────────────────────────────────────────────────────────────
 
-  # Parquet produced by Day 4 transcript structurer.
-  # Required columns: transcript_id, ticker, earnings_date, quarter, year
-  transcript_metadata: data/interim/transcript_metadata.parquet
+  # Parquet produced by the transcript preprocessing pipeline and used by
+  # FinBERT/LM. Required columns: transcript_id, ticker, earnings_date.
+  transcript_metadata: data/interim/transcripts/transcripts_cleaned.parquet
 
   # Optional: override with a CSV for quick ad-hoc runs.
   # transcript_metadata: data/interim/transcript_metadata.csv

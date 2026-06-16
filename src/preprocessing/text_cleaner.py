@@ -7,14 +7,6 @@ QA_PATTERNS = [
     r"questions?\\s+and\\s+answers?",
 ]
 
-
-MAX_TOKENS = 420
-OVERLAP = 60
-
-from transformers import AutoTokenizer
-
-_tokenizer = AutoTokenizer.from_pretrained("ProsusAI/finbert")
-
 """
 src/preprocessing/text_cleaner.py
 ===================================
@@ -242,7 +234,9 @@ class TextCleaner:
     @staticmethod
     def word_count(text: str) -> int:
         """Return word count of a text string."""
-        return len(tokenizer.encode(text, add_special_tokens=False))
+        if not text or not isinstance(text, str):
+            return 0
+        return len(text.split())
 
     @staticmethod
     def char_count(text: str) -> int:

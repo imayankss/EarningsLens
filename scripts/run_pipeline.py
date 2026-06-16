@@ -30,6 +30,8 @@ import sys
 from pathlib import Path
 from time import perf_counter
 
+import pandas as pd
+
 # ── Make src importable from scripts/ ──────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -42,7 +44,7 @@ from src.ingestion.market_data_loader import MarketDataLoader
 from src.preprocessing.cleaner import TranscriptCleaner
 from src.preprocessing.chunker import TranscriptChunker
 from src.sentiment.finbert_pipeline import FinBERTPipeline
-from src.sentiment.lm_baseline import LoughranMcDonaldBaseline
+from src.sentiment.lm_pipeline import LMPipeline, LMPipelineConfig
 from src.sentiment.aggregator import SentimentAggregator
 from src.event_study.engine import EventStudyEngine
 
@@ -66,6 +68,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-lm", action="store_true",
         help="Skip LM baseline (use if dictionary not downloaded)"
+    )
+    parser.add_argument(
+        "--allow-stub-dictionary", action="store_true",
+        help="Use the small built-in LM stub dictionary for tests only"
     )
     return parser.parse_args()
 
@@ -147,16 +153,23 @@ def main() -> None:
     lm_scores = None
     if not args.skip_lm:
         stage("Stage 6 — Loughran-McDonald Baseline")
-        try:
-            lm = LoughranMcDonaldBaseline()
-            lm_scores = lm.score_dataframe(cleaned_df, text_col="transcript_text")
-            save_parquet(
-                lm_scores,
-                "data/processed/sentiment/lm_scores.parquet",
+        lm_config = LMPipelineConfig(
+            chunks_path=Path("data/interim/chunks/chunks.parquet"),
+            dictionary_path=Path(config["paths"]["lm_dictionary"]),
+            output_dir=Path("data/processed/sentiment"),
+            interim_dir=Path("data/interim"),
+            overwrite=True,
+            allow_stub_dictionary=args.allow_stub_dictionary,
+        )
+        lm_result = LMPipeline(lm_config).run()
+        log.info(lm_result.summary())
+        lm_scores_path = Path("data/processed/sentiment/lm_scores.parquet")
+        if not lm_result.success or not lm_scores_path.exists():
+            raise RuntimeError(
+                "LM pipeline failed to create data/processed/sentiment/"
+                "lm_scores.parquet. Check the Stage 6 logs above."
             )
-        except FileNotFoundError as e:
-            log.warning(f"LM dictionary not found — skipping. {e}")
-            lm_scores = None
+        lm_scores = pd.read_parquet(lm_scores_path)
     else:
         log.warning("Stage 6 skipped (--skip-lm flag set)")
 

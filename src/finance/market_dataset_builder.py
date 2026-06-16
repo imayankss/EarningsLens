@@ -290,7 +290,8 @@ class MarketPipelineConfig:
     processed_dir : Path
         Final output directory for market_data.parquet / .csv.
     transcript_metadata_path : Path
-        Input: parquet produced by MetadataExtractor (Day 4).
+        Input: parquet produced by transcript preprocessing and used by
+        sentiment pipelines.
 
     # ── Benchmark ──────────────────────────────────────────────────────
     benchmark_ticker : str
@@ -348,7 +349,9 @@ class MarketPipelineConfig:
         default_factory=lambda: Path("data/processed")
     )
     transcript_metadata_path: Path = field(
-        default_factory=lambda: Path("data/interim/transcript_metadata.parquet")
+        default_factory=lambda: Path(
+            "data/interim/transcripts/transcripts_cleaned.parquet"
+        )
     )
 
     # Benchmark
@@ -824,7 +827,7 @@ class MarketDatasetBuilder:
         Parameters (via config)
         -----------------------
         transcript_metadata_path : Path
-            ``data/interim/transcript_metadata.parquet`` by default.
+            ``data/interim/transcripts/transcripts_cleaned.parquet`` by default.
 
         Returns
         -------

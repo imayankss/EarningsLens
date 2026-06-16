@@ -71,6 +71,21 @@ class TranscriptLoader:
         log.info(f"Downloading HuggingFace dataset: {dataset_name}")
         dataset = load_dataset(dataset_name, split="train")
 
+        if tickers:
+            ticker_set = {str(t).upper() for t in tickers}
+            ticker_col = next(
+                (col for col in ("ticker", "symbol") if col in dataset.column_names),
+                None,
+            )
+            if ticker_col is not None:
+                dataset = dataset.filter(
+                    lambda row: str(row.get(ticker_col, "")).upper() in ticker_set
+                )
+                log.info(
+                    f"Filtered HuggingFace dataset to {len(dataset):,} rows "
+                    f"for {len(ticker_set)} tickers"
+                )
+
         if max_rows:
             dataset = dataset.select(range(min(max_rows, len(dataset))))
 
@@ -82,7 +97,8 @@ class TranscriptLoader:
 
         if tickers:
             before = len(df)
-            df = df[df["ticker"].isin(tickers)].reset_index(drop=True)
+            ticker_set = {str(t).upper() for t in tickers}
+            df = df[df["ticker"].astype(str).str.upper().isin(ticker_set)].reset_index(drop=True)
             log.info(f"Filtered {before:,} → {len(df):,} rows for {len(tickers)} tickers")
 
         return df

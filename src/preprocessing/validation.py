@@ -7,14 +7,6 @@ QA_PATTERNS = [
     r"questions?\\s+and\\s+answers?",
 ]
 
-
-MAX_TOKENS = 420
-OVERLAP = 60
-
-from transformers import AutoTokenizer
-
-_tokenizer = AutoTokenizer.from_pretrained("ProsusAI/finbert")
-
 """
 src/preprocessing/validation.py
 =================================
@@ -55,6 +47,13 @@ import pandas as pd
 from src.utils.logger import get_logger
 
 log = get_logger(__name__)
+
+
+def _word_count(text: object) -> int:
+    """Cheap deterministic word count used by validation gates."""
+    if not isinstance(text, str) or not text:
+        return 0
+    return len(text.split())
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +160,7 @@ class TranscriptValidator:
         result = ValidationResult(is_valid=True)
 
         # ── Required fields ──────────────────────────────────────
-        result.merge(self._check_required_fields(row, TRANSCRIPT_SCHEMA))
+        result = result.merge(self._check_required_fields(row, TRANSCRIPT_SCHEMA))
 
         # ── transcript_id format ─────────────────────────────────
         tid = str(row.get("transcript_id", ""))
@@ -176,11 +175,11 @@ class TranscriptValidator:
             result.add_error(f"Invalid ticker: '{ticker}'")
 
         # ── Earnings date ────────────────────────────────────────
-        result.merge(self._check_date(row.get("earnings_date"), "earnings_date"))
+        result = result.merge(self._check_date(row.get("earnings_date"), "earnings_date"))
 
         # ── Word count ───────────────────────────────────────────
         text = str(row.get("transcript_text_clean", ""))
-        words = len(_tokenizer.encode(text, add_special_tokens=False))
+        words = _word_count(text)
         if words < MIN_TRANSCRIPT_WORDS:
             result.add_error(
                 f"transcript_text_clean too short: {words} words "
@@ -194,17 +193,11 @@ class TranscriptValidator:
 
         # ── Section detection ────────────────────────────────────
         if "prepared_text" in row:
-            prep_words = len(
-                _tokenizer.encode(
-                    str(row.get("prepared_text", "")), add_special_tokens=False
-                )
-            )
+            prep_words = _word_count(row.get("prepared_text", ""))
             if prep_words < 50:
                 result.add_warning(f"Prepared remarks very short: {prep_words} words")
         if "qa_text" in row:
-            qa_words = len(
-                _tokenizer.encode(str(row.get("qa_text", "")), add_special_tokens=False)
-            )
+            qa_words = _word_count(row.get("qa_text", ""))
             if qa_words < 10:
                 result.add_warning("Q&A section not detected or very short")
 
@@ -266,7 +259,7 @@ class TranscriptValidator:
             - chunk_id format correct
         """
         result = ValidationResult(is_valid=True)
-        result.merge(self._check_required_fields(row, CHUNK_SCHEMA))
+        result = result.merge(self._check_required_fields(row, CHUNK_SCHEMA))
 
         token_count = int(row.get("token_count", 0))
         if token_count < MIN_CHUNK_TOKENS:
