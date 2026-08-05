@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="EarningsLens icon">
+  <defs>
+    <linearGradient id="background" x1="8" y1="4" x2="56" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0f2747"/>
+      <stop offset="1" stop-color="#06131f"/>
+    </linearGradient>
+    <linearGradient id="line" x1="12" y1="48" x2="53" y2="17" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22c55e"/>
+      <stop offset="1" stop-color="#67e8f9"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#background)"/>
+  <path d="M12 49h40M12 37h40M12 25h40" stroke="#94a3b8" stroke-opacity=".18" stroke-width="2"/>
+  <path d="m13 46 10-10 8 5 10-16 10-8" fill="none" stroke="url(#line)" stroke-linecap="round" stroke-linejoin="round" stroke-width="5"/>
+  <circle cx="51" cy="17" r="4" fill="#67e8f9"/>
+</svg>

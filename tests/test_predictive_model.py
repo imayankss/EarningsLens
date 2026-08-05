@@ -194,5 +194,8 @@ def test_enough_synthetic_rows_train_sklearn_models_when_available(tmp_path: Pat
     assert {"logistic_regression", "random_forest"}.issubset(set(trained["model_name"]))
     assert not feature_importance.empty
     assert metadata["models_trained"]
-    assert set(trained["accuracy"].dropna()) <= {1.0}
+    accuracies = trained["accuracy"].dropna()
+    assert not accuracies.empty
+    assert accuracies.between(0.0, 1.0).all()
+    assert (accuracies >= 0.75).all()
     assert not any(warnings_df["message"].str.contains("sklearn unavailable", case=False, na=False))

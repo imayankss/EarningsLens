@@ -25,6 +25,11 @@ flowchart TD
     I --> P[app.py Streamlit dashboard]
     N --> P
     O --> P
+    I --> Q[scripts/export_web_data.py]
+    L --> Q
+    O --> Q
+    Q --> R[web/public/data/dashboard.json]
+    R --> S[Next.js static dashboard]
 ```
 
 ## Data Flow
@@ -43,6 +48,9 @@ flowchart LR
     R[reports/tables/*.csv]
     G[reports/figures/*.png]
     S[app.py]
+    W[scripts/export_web_data.py]
+    J[web/public/data/dashboard.json]
+    V[Next.js on Vercel]
 
     T --> D
     F --> X
@@ -57,6 +65,11 @@ flowchart LR
     D --> G
     R --> S
     G --> S
+    D --> W
+    N --> W
+    R --> W
+    W --> J
+    J --> V
 ```
 
 ## Module-Level Explanation
@@ -97,6 +110,14 @@ Generates static matplotlib PNG charts for reports and dashboard display.
 
 Streamlit dashboard that reads generated tables, figures, metadata, and processed datasets. It does not modify pipeline outputs.
 
+### `scripts/export_web_data.py`
+
+Reads existing checked CSV/JSON artifacts and writes a small JSON contract for the web application. It performs no transcript ingestion, market download, transformer inference, or model training and rejects non-finite JSON values.
+
+### `web/`
+
+Next.js App Router application deployed with `web/` as the Vercel Root Directory. Normal requests serve static UI assets and `web/public/data/dashboard.json`; the application does not require the Python runtime.
+
 ## Output Artifact Map
 
 | Artifact | Purpose |
@@ -111,3 +132,4 @@ Streamlit dashboard that reads generated tables, figures, metadata, and processe
 | `reports/tables/prediction_model_metrics.csv` | Model status/metrics table |
 | `reports/figures/*.png` | Static professional figures |
 | `models/predictive_model_metadata.json` | Prediction metadata and skip reasons |
+| `web/public/data/dashboard.json` | Versioned deployment-safe dashboard contract |

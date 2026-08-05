@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Final, Sequence
 
@@ -273,7 +273,7 @@ class DatasetValidationResult:
     row_count: int                      = 0
     event_count: int                    = 0
     validated_at: str                   = field(
-        default_factory=lambda: datetime.utcnow().isoformat()
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
     dataset_label: str                  = ""
 
@@ -707,7 +707,7 @@ class EventStudyValidator:
             "warning_count":   warning,
             "info_count":      info,
             "stages":          stages_summary,
-            "validated_at":    datetime.utcnow().isoformat(),
+            "validated_at":    datetime.now(timezone.utc).isoformat(),
         }
 
         logger.info(

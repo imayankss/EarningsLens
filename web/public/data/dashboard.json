@@ -1,0 +1,185 @@
+{
+  "analyses": [
+    {
+      "comparison": {
+        "absoluteDifference": 0.05966347859414678,
+        "directionalAgreement": true,
+        "scoreDifference": -0.05966347859414678
+      },
+      "finbert": {
+        "direction": "positive",
+        "meanConfidence": 0.7765344158064517,
+        "negativeProbability": 0.028431892329331757,
+        "neutralProbability": 0.510687284356275,
+        "positiveProbability": 0.4608808283369491,
+        "score": 0.4324489356025076
+      },
+      "loughranMcDonald": {
+        "label": "positive",
+        "negativeCount": 60,
+        "positiveCount": 172,
+        "scoredWordCount": 9026,
+        "toneScore": 0.49211241419665436
+      },
+      "marketReaction": {
+        "cumulativeAbnormalReturns": [
+          {
+            "horizonDays": 3,
+            "label": "3D CAR",
+            "value": 0.14182139097169788
+          },
+          {
+            "horizonDays": 5,
+            "label": "5D CAR",
+            "value": 0.2931963215399638
+          }
+        ],
+        "eventDate": "2020-10-30",
+        "marketWindowEnd": "2020-11-17",
+        "marketWindowStart": "2020-07-31",
+        "windows": [
+          {
+            "abnormalReturn": 0.011302892222619487,
+            "horizonDays": 1,
+            "label": "1D",
+            "rawReturn": -0.0008266579075562053
+          },
+          {
+            "abnormalReturn": 0.03862599465510763,
+            "horizonDays": 2,
+            "label": "2D",
+            "rawReturn": 0.01451402038111671
+          },
+          {
+            "abnormalReturn": 0.09189250409397076,
+            "horizonDays": 3,
+            "label": "3D",
+            "rawReturn": 0.05594344709049803
+          },
+          {
+            "abnormalReturn": 0.1513749305682659,
+            "horizonDays": 5,
+            "label": "5D",
+            "rawReturn": 0.0921807020284442
+          }
+        ]
+      },
+      "nlp": {
+        "topKeywords": [
+          "quarter",
+          "iphone",
+          "year",
+          "apple",
+          "services"
+        ],
+        "topics": [
+          {
+            "count": 142,
+            "name": "Product Customer",
+            "ratio": 0.017319
+          },
+          {
+            "count": 86,
+            "name": "Revenue Growth",
+            "ratio": 0.010489
+          },
+          {
+            "count": 86,
+            "name": "Guidance Outlook",
+            "ratio": 0.010489
+          },
+          {
+            "count": 42,
+            "name": "Margin Profitability",
+            "ratio": 0.005123
+          },
+          {
+            "count": 15,
+            "name": "Risk Uncertainty",
+            "ratio": 0.001829
+          },
+          {
+            "count": 14,
+            "name": "Cost Expense",
+            "ratio": 0.001708
+          },
+          {
+            "count": 13,
+            "name": "Cash Debt Capital",
+            "ratio": 0.001586
+          }
+        ],
+        "totalTokens": 8199,
+        "uncertaintyCount": 46,
+        "uncertaintyRatio": 0.00561
+      },
+      "speakerAnalysis": {
+        "aggregate": {
+          "averageSentimentScore": 0.429009,
+          "chunkCount": 31,
+          "label": null,
+          "negativeChunks": 0,
+          "neutralChunks": 16,
+          "positiveChunks": 15,
+          "sentimentStdDev": 0.328172
+        },
+        "available": false,
+        "groups": [],
+        "message": "The verified artifact contains aggregate chunk sentiment, but no speaker or section labels."
+      },
+      "transcript": {
+        "chunkCount": 31,
+        "cleanWordCount": 8484,
+        "companyName": "Apple Inc.",
+        "earningsDate": "2020-10-29 17:00:00",
+        "fiscalQuarter": 4,
+        "fiscalYear": 2020,
+        "id": "AAPL_20201029",
+        "ticker": "AAPL"
+      }
+    }
+  ],
+  "dataset": {
+    "companyCount": 1,
+    "isLimited": true,
+    "kind": "demonstration",
+    "label": "Verified repository artifact snapshot",
+    "notice": "Demonstration dataset: one checked transcript/event. Results are descriptive, not investment advice or validated predictive evidence.",
+    "observationCount": 1
+  },
+  "modeling": {
+    "featureCount": 25,
+    "message": "Training is intentionally skipped because the verified dataset has one observation.",
+    "modelsAttempted": 9,
+    "modelsTrained": 0,
+    "observationCount": 1,
+    "status": "insufficient_sample_size"
+  },
+  "provenance": [
+    {
+      "label": "Master analysis",
+      "path": "data/processed/master_dataset.csv"
+    },
+    {
+      "label": "Advanced NLP",
+      "path": "data/processed/nlp/advanced_nlp_features.csv"
+    },
+    {
+      "label": "Model comparison",
+      "path": "reports/tables/sentiment_model_comparison.csv"
+    },
+    {
+      "label": "Topic frequency",
+      "path": "reports/tables/topic_frequency.csv"
+    },
+    {
+      "label": "Speaker summary",
+      "path": "reports/tables/speaker_sentiment_summary.csv"
+    },
+    {
+      "label": "Model status",
+      "path": "models/predictive_model_metadata.json"
+    }
+  ],
+  "schemaVersion": 1
+}

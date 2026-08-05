@@ -1,0 +1,12 @@
+# The Vercel project root is web/. Keep the research pipeline, datasets,
+# local test output, and dependency caches out of CLI deployment uploads.
+/*
+!web
+!web/**
+
+web/.next
+web/.npm
+web/node_modules
+web/*.tsbuildinfo
+web/.env*
+!web/.env.example
