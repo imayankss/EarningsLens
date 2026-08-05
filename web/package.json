@@ -4,9 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "validate:data": "node scripts/validate-dashboard-data.mjs",
+    "prebuild": "npm run validate:data",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . --max-warnings=0"
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "engines": {
+    "node": "22.x"
   },
   "dependencies": {
     "@radix-ui/react-progress": "^1.1.10",
@@ -16,7 +23,7 @@
     "clsx": "^2.1.1",
     "framer-motion": "^12.41.0",
     "lucide-react": "^1.21.0",
-    "next": "^16.2.9",
+    "next": "^16.3.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "recharts": "^3.9.0",
@@ -28,7 +35,7 @@
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.5.1",
     "eslint": "^9.39.4",
-    "eslint-config-next": "^16.2.9",
+    "eslint-config-next": "^16.3.0",
     "postcss": "^8.5.15",
     "tailwindcss": "^3.4.17",
     "typescript": "^6.0.3"

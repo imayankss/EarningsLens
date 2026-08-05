@@ -16,12 +16,15 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 *.so
 
 # Environment
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 .streamlit/secrets.toml
 
 # Data — never commit raw/interim/processed data
@@ -80,6 +83,7 @@ logs/*
 # Temporary files
 temp/
 tmp/
+*.tmp
 
 # Reports (keep structure and generated portfolio artifacts)
 reports/figures/*
@@ -88,3 +92,13 @@ reports/tables/*
 !reports/tables/.gitkeep
 !reports/figures/*.png
 !reports/tables/*.csv
+
+# JavaScript dependencies and build output
+node_modules/
+.npm/
+.next/
+out/
+*.tsbuildinfo
+
+# Vercel local project links (never share across repositories)
+.vercel/

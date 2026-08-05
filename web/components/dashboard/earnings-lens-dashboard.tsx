@@ -2,37 +2,34 @@
 
 import { motion } from "framer-motion";
 import {
-  Activity,
+  ArrowRight,
   ArrowUpRight,
   BarChart3,
-  Blocks,
   BrainCircuit,
-  CandlestickChart,
+  CheckCircle2,
+  ChevronRight,
+  CircleAlert,
   Code2,
   Cpu,
-  DatabaseZap,
-  ExternalLink,
+  Database,
   FileText,
   GitBranch,
+  Layers3,
   LibraryBig,
   LineChart as LineChartIcon,
-  Presentation,
-  Radar,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
-  UsersRound,
   Workflow,
 } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
   Legend,
-  Line,
-  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -41,7 +38,6 @@ import {
   YAxis,
 } from "recharts";
 
-import { FinanceTicker } from "@/components/dashboard/finance-ticker";
 import { SectionShell } from "@/components/dashboard/section-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,8 +48,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Separator } from "@/components/ui/separator";
 import {
   Table,
   TableBody,
@@ -62,58 +56,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  ctaLinks,
-  demoDrivers,
-  eventStudyData,
-  heroMetrics,
-  insightCards,
-  lmCategories,
-  modelComparison,
-  pipelineStages,
-  predictiveCards,
-  sentimentCards,
-  sentimentDistribution,
-  speakerInsights,
-  tickerMovements,
-  transcriptMoments,
-} from "@/data/dashboard-data";
+import { pipelineStages, repositoryLinks } from "@/data/dashboard-data";
 import { cn } from "@/lib/utils";
-import type { SentimentTone } from "@/types/dashboard";
+import type { AnalysisResult, DashboardData } from "@/types/dashboard";
 
-const toneStyles: Record<
-  SentimentTone,
-  { bg: string; border: string; text: string; soft: string; line: string }
-> = {
-  positive: {
-    bg: "bg-emerald-400/10",
-    border: "border-emerald-400/25",
-    text: "text-emerald-300",
-    soft: "from-emerald-400/20 to-cyan-400/5",
-    line: "#22c55e",
-  },
-  negative: {
-    bg: "bg-rose-400/10",
-    border: "border-rose-400/25",
-    text: "text-rose-300",
-    soft: "from-rose-400/20 to-slate-400/5",
-    line: "#f43f5e",
-  },
-  neutral: {
-    bg: "bg-slate-400/10",
-    border: "border-slate-400/20",
-    text: "text-slate-300",
-    soft: "from-slate-400/20 to-cyan-400/5",
-    line: "#94a3b8",
-  },
-  warning: {
-    bg: "bg-amber-400/10",
-    border: "border-amber-400/25",
-    text: "text-amber-300",
-    soft: "from-amber-400/20 to-cyan-400/5",
-    line: "#f59e0b",
-  },
+const DATA_URL = "/data/dashboard.json";
+
+const chartColors = {
+  cyan: "#38bdf8",
+  emerald: "#22c55e",
+  rose: "#f43f5e",
+  slate: "#94a3b8",
+  amber: "#f59e0b",
+  violet: "#8b5cf6",
 };
 
 type TooltipPayload = {
@@ -122,33 +77,83 @@ type TooltipPayload = {
   value?: number | string;
 };
 
+function isDashboardData(value: unknown): value is DashboardData {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<DashboardData>;
+  return (
+    candidate.schemaVersion === 1 &&
+    Array.isArray(candidate.analyses) &&
+    Boolean(candidate.dataset) &&
+    Boolean(candidate.modeling)
+  );
+}
+
+function formatInteger(value: number | null | undefined): string {
+  return value === null || value === undefined
+    ? "Not available"
+    : new Intl.NumberFormat("en-US").format(value);
+}
+
+function formatPercent(value: number | null | undefined, digits = 1): string {
+  return value === null || value === undefined
+    ? "Not available"
+    : new Intl.NumberFormat("en-US", {
+        style: "percent",
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+      }).format(value);
+}
+
+function formatScore(value: number | null | undefined, digits = 3): string {
+  return value === null || value === undefined ? "Not available" : value.toFixed(digits);
+}
+
+function formatDate(value: string | null | undefined): string {
+  if (!value) return "Not available";
+  const dateOnly = value.slice(0, 10);
+  const date = new Date(`${dateOnly}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+function titleCase(value: string | null | undefined): string {
+  if (!value) return "Not available";
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function ChartTooltip({
   active,
   payload,
   label,
+  suffix = "",
 }: {
   active?: boolean;
   payload?: TooltipPayload[];
   label?: string | number;
+  suffix?: string;
 }) {
-  if (!active || !payload?.length) {
-    return null;
-  }
+  if (!active || !payload?.length) return null;
 
   return (
-    <div className="rounded-md border border-white/10 bg-slate-950/95 px-3 py-2 font-mono text-xs shadow-glow backdrop-blur-xl">
-      {label ? <div className="mb-1 text-slate-300">{label}</div> : null}
+    <div className="rounded-lg border border-white/10 bg-slate-950/95 px-3 py-2 text-xs shadow-glow backdrop-blur-xl">
+      {label !== undefined ? <p className="mb-1 font-medium text-slate-200">{label}</p> : null}
       <div className="space-y-1">
-        {payload.map((item) => (
-          <div key={`${item.name}-${item.value}`} className="flex items-center gap-2">
-            <span
-              className="size-2 rounded-full"
-              style={{ backgroundColor: item.color ?? "#38bdf8" }}
-            />
-            <span className="text-slate-400">{item.name}</span>
-            <span className="text-white">{item.value}</span>
-          </div>
-        ))}
+        {payload.map((item) => {
+          const value =
+            typeof item.value === "number" ? `${item.value.toFixed(2)}${suffix}` : item.value;
+          return (
+            <div key={`${item.name}-${item.value}`} className="flex items-center gap-2">
+              <span className="size-2 rounded-full" style={{ backgroundColor: item.color }} />
+              <span className="text-slate-400">{item.name}</span>
+              <span className="font-mono text-white">{value}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -158,26 +163,24 @@ function ChartPanel({
   title,
   description,
   children,
-  className,
 }: {
   title: string;
   description: string;
   children: React.ReactNode;
-  className?: string;
 }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 22 }}
+      initial={{ opacity: 0, y: 18 }}
       whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, amount: 0.18 }}
-      transition={{ duration: 0.5, ease: "easeOut" }}
-      className={className}
+      viewport={{ once: true, amount: 0.15 }}
+      transition={{ duration: 0.45 }}
+      className="h-full"
     >
       <Card className="h-full overflow-hidden">
         <div className="h-1 bg-gradient-to-r from-cyan-400 via-violet-400 to-emerald-400" />
         <CardHeader>
           <CardTitle className="text-white">{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
+          <CardDescription className="leading-6">{description}</CardDescription>
         </CardHeader>
         <CardContent>{children}</CardContent>
       </Card>
@@ -185,357 +188,269 @@ function ChartPanel({
   );
 }
 
-function DashboardIcon({
-  name,
-  className,
-}: {
-  name: string;
-  className?: string;
-}) {
-  switch (name) {
-    case "BarChart3":
-      return <BarChart3 className={className} />;
-    case "Blocks":
-      return <Blocks className={className} />;
-    case "BrainCircuit":
-      return <BrainCircuit className={className} />;
-    case "CandlestickChart":
-      return <CandlestickChart className={className} />;
-    case "Code2":
-      return <Code2 className={className} />;
-    case "Cpu":
-      return <Cpu className={className} />;
-    case "DatabaseZap":
-      return <DatabaseZap className={className} />;
-    case "FileText":
-      return <FileText className={className} />;
-    case "Github":
-      return <GitBranch className={className} />;
-    case "LibraryBig":
-      return <LibraryBig className={className} />;
-    case "LineChart":
-      return <LineChartIcon className={className} />;
-    case "Presentation":
-      return <Presentation className={className} />;
-    case "Radar":
-      return <Radar className={className} />;
-    case "ShieldCheck":
-      return <ShieldCheck className={className} />;
-    case "Sparkles":
-      return <Sparkles className={className} />;
-    case "UsersRound":
-      return <UsersRound className={className} />;
-    case "Workflow":
-      return <Workflow className={className} />;
-    default:
-      return <Activity className={className} />;
-  }
-}
-
-function HeroMetricCard({
-  metric,
-  index,
-}: {
-  metric: (typeof heroMetrics)[number];
-  index: number;
-}) {
-  const tone = toneStyles[metric.tone];
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay: 0.48 + index * 0.08 }}
-    >
-      <Card className={cn("h-full overflow-hidden", tone.border)}>
-        <CardContent className="p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="font-mono text-[11px] uppercase text-slate-400">
-                {metric.label}
-              </p>
-              <p className={cn("mt-2 text-2xl font-semibold", tone.text)}>
-                {metric.value}
-              </p>
-            </div>
-            <div className={cn("rounded-md border p-2", tone.bg, tone.border)}>
-              <DashboardIcon name={metric.icon} className={cn("size-5", tone.text)} />
-            </div>
-          </div>
-          <p className="mt-3 text-sm text-slate-400">{metric.detail}</p>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-}
-
-function SignalCard({
+function MetricCard({
   label,
   value,
-  description,
-  tone,
+  detail,
+  icon: Icon,
+  tone = "cyan",
 }: {
   label: string;
   value: string;
-  description: string;
-  tone: SentimentTone;
+  detail: string;
+  icon: typeof FileText;
+  tone?: "cyan" | "emerald" | "amber" | "slate";
 }) {
-  const style = toneStyles[tone];
+  const styles = {
+    cyan: "border-cyan-400/20 bg-cyan-400/[0.06] text-cyan-200",
+    emerald: "border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-200",
+    amber: "border-amber-400/20 bg-amber-400/[0.06] text-amber-200",
+    slate: "border-slate-400/15 bg-slate-400/[0.05] text-slate-200",
+  };
 
   return (
-    <Card className={cn("overflow-hidden", style.border)}>
+    <Card className={cn("h-full", styles[tone])}>
       <CardContent className="p-5">
-        <div className={cn("mb-4 h-1 w-14 rounded-full", style.bg)} />
-        <div className={cn("font-mono text-2xl font-semibold", style.text)}>
-          {value}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-slate-400">{label}</p>
+            <p className="mt-3 text-2xl font-semibold text-white">{value}</p>
+          </div>
+          <Icon aria-hidden className="size-5 shrink-0" />
         </div>
-        <div className="mt-2 text-sm font-medium text-white">{label}</div>
-        <p className="mt-2 text-sm leading-6 text-slate-400">{description}</p>
+        <p className="mt-3 text-sm leading-6 text-slate-400">{detail}</p>
       </CardContent>
     </Card>
   );
 }
 
-function HeroSection() {
+function EmptyPanel({ title, message }: { title: string; message: string }) {
   return (
-    <section className="relative overflow-hidden px-4 pb-12 pt-8 sm:px-6 lg:px-8">
-      <div aria-hidden className="absolute inset-0 market-grid opacity-70" />
-      <div
-        aria-hidden
-        className="absolute inset-x-0 top-0 h-36 bg-gradient-to-b from-cyan-400/10 to-transparent"
-      />
-      <div
-        aria-hidden
-        className="scanline absolute left-0 right-0 top-0 h-24 bg-gradient-to-b from-transparent via-cyan-300/10 to-transparent"
-      />
+    <div className="flex min-h-64 flex-col items-center justify-center rounded-lg border border-dashed border-white/15 bg-white/[0.025] p-8 text-center">
+      <CircleAlert aria-hidden className="size-7 text-amber-300" />
+      <p className="mt-4 font-medium text-white">{title}</p>
+      <p className="mt-2 max-w-md text-sm leading-6 text-slate-400">{message}</p>
+    </div>
+  );
+}
 
-      <div className="relative mx-auto grid min-h-[760px] max-w-7xl items-center gap-10 py-10 lg:grid-cols-[1.08fr_0.92fr] lg:py-16">
+function SiteHeader() {
+  return (
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-[#050816]/90 backdrop-blur-xl">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+        <a href="#top" className="flex items-center gap-2 font-semibold text-white">
+          <span className="flex size-8 items-center justify-center rounded-lg border border-cyan-300/30 bg-cyan-300/10">
+            <Sparkles aria-hidden className="size-4 text-cyan-200" />
+          </span>
+          EarningsLens
+        </a>
+        <nav aria-label="Primary navigation" className="hidden items-center gap-6 text-sm text-slate-300 md:flex">
+          <a className="transition hover:text-white" href="#results">Results</a>
+          <a className="transition hover:text-white" href="#market-reaction">Market reaction</a>
+          <a className="transition hover:text-white" href="#architecture">Architecture</a>
+          <Link className="transition hover:text-white" href="/methodology">Methodology</Link>
+        </nav>
+        <Button asChild size="sm" variant="outline" className="border-white/15 bg-white/5">
+          <a href="https://github.com/imayankss/EarningsLens" target="_blank" rel="noreferrer">
+            <GitBranch aria-hidden className="size-4" />
+            <span className="hidden sm:inline">Source</span>
+          </a>
+        </Button>
+      </div>
+    </header>
+  );
+}
+
+function LoadingDashboard() {
+  return (
+    <main className="min-h-screen bg-[#050816]">
+      <SiteHeader />
+      <div className="mx-auto flex min-h-[70vh] max-w-7xl items-center px-4 sm:px-6 lg:px-8" role="status" aria-live="polite">
+        <div className="w-full rounded-2xl border border-white/10 bg-slate-950/55 p-8">
+          <div className="h-4 w-36 animate-pulse rounded bg-cyan-300/15" />
+          <div className="mt-6 h-12 max-w-2xl animate-pulse rounded bg-white/10" />
+          <div className="mt-4 h-5 max-w-xl animate-pulse rounded bg-white/[0.06]" />
+          <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {[0, 1, 2, 3].map((item) => (
+              <div key={item} className="h-36 animate-pulse rounded-lg border border-white/10 bg-white/[0.04]" />
+            ))}
+          </div>
+          <span className="sr-only">Loading verified EarningsLens data.</span>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function ErrorDashboard({ message, retry }: { message: string; retry: () => void }) {
+  return (
+    <main className="min-h-screen bg-[#050816]">
+      <SiteHeader />
+      <div className="mx-auto flex min-h-[70vh] max-w-3xl items-center px-4 text-center">
+        <Card className="w-full border-rose-400/20">
+          <CardContent className="p-8">
+            <CircleAlert aria-hidden className="mx-auto size-9 text-rose-300" />
+            <h1 className="mt-5 text-2xl font-semibold text-white">The verified data snapshot could not be loaded.</h1>
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-400">{message}</p>
+            <Button className="mt-6" onClick={retry}>
+              <RefreshCw aria-hidden className="size-4" />
+              Retry data request
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    </main>
+  );
+}
+
+function Hero({ data, analysis }: { data: DashboardData; analysis: AnalysisResult }) {
+  const transcript = analysis.transcript;
+  const agreement = analysis.comparison.directionalAgreement;
+
+  return (
+    <section id="top" className="relative overflow-hidden border-b border-white/10 px-4 pb-14 pt-12 sm:px-6 lg:px-8 lg:pb-20 lg:pt-20">
+      <div aria-hidden className="market-grid absolute inset-0 opacity-65" />
+      <div aria-hidden className="absolute inset-x-0 top-0 h-56 bg-gradient-to-b from-cyan-400/10 to-transparent" />
+      <div className="relative mx-auto grid max-w-7xl gap-10 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
         <div>
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55 }}
-            className="mb-5 flex flex-wrap gap-3"
-          >
-            <Badge
-              variant="outline"
-              className="border-cyan-400/30 bg-cyan-400/10 font-mono text-cyan-200"
-            >
-              Static-first Next.js dashboard
+          <div className="flex flex-wrap gap-3">
+            <Badge variant="outline" className="border-amber-300/30 bg-amber-300/10 font-mono text-amber-100">
+              Verified {data.dataset.kind} dataset · n={data.dataset.observationCount}
             </Badge>
-            <Badge
-              variant="outline"
-              className="border-emerald-400/30 bg-emerald-400/10 font-mono text-emerald-200"
-            >
-              Python NLP pipeline unchanged
+            <Badge variant="outline" className="border-emerald-300/30 bg-emerald-300/10 font-mono text-emerald-100">
+              Precomputed pipeline output
             </Badge>
-          </motion.div>
-
+          </div>
           <motion.h1
-            initial={{ opacity: 0, y: 24 }}
+            initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.65, delay: 0.08 }}
-            className="max-w-5xl text-6xl font-semibold leading-none text-white sm:text-7xl lg:text-8xl"
+            className="mt-7 max-w-4xl text-5xl font-semibold leading-[0.98] tracking-tight text-white sm:text-6xl lg:text-7xl"
           >
-            EarningsLens
+            Earnings-call language, translated into market-aware signals.
           </motion.h1>
-          <motion.p
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.16 }}
-            className="mt-5 text-2xl font-medium text-cyan-100 sm:text-3xl"
-          >
-            Earnings Call Sentiment Intelligence Platform
-          </motion.p>
-          <motion.p
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.24 }}
-            className="mt-6 max-w-3xl text-base leading-8 text-slate-300 sm:text-lg"
-          >
-            AI-powered financial NLP platform analyzing earnings call transcripts
-            using FinBERT, Loughran-McDonald sentiment analysis,
-            speaker-aware transcript processing, and event-study pipelines.
-          </motion.p>
-
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.32 }}
-            className="mt-8 flex flex-wrap gap-3"
-          >
+          <p className="mt-6 max-w-3xl text-base leading-8 text-slate-300 sm:text-lg">
+            EarningsLens connects FinBERT, the Loughran–McDonald financial dictionary, advanced transcript features, and event-study outputs in a deployment-safe research dashboard.
+          </p>
+          <div className="mt-7 rounded-lg border border-amber-300/20 bg-amber-300/[0.07] p-4 text-sm leading-6 text-amber-50">
+            <strong className="font-semibold">Dataset scope:</strong> {data.dataset.notice}
+          </div>
+          <div className="mt-8 flex flex-wrap gap-3">
             <Button asChild size="lg" className="bg-cyan-300 text-slate-950 hover:bg-cyan-200">
-              <a
-                href="https://github.com/imayankss/earnings-call-sentiment-analyzer"
-                target="_blank"
-                rel="noreferrer"
-              >
-                View GitHub Repository
-                <ArrowUpRight className="size-4" />
+              <a href="#results">
+                Explore verified results
+                <ArrowRight aria-hidden className="size-4" />
               </a>
             </Button>
             <Button asChild size="lg" variant="outline" className="border-white/15 bg-white/5">
-              <a href="#interactive-demo">Open Demo Signal</a>
+              <Link href="/methodology">Read methodology</Link>
             </Button>
-          </motion.div>
+          </div>
         </div>
 
-        <motion.div
-          initial={{ opacity: 0, scale: 0.96, y: 20 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          transition={{ duration: 0.7, delay: 0.22 }}
-          className="relative"
-        >
-          <Card className="relative overflow-hidden border-cyan-400/20 bg-slate-950/70">
-            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300 to-transparent" />
+        <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.12 }}>
+          <Card className="overflow-hidden border-cyan-300/20 bg-slate-950/75">
+            <div className="h-1 bg-gradient-to-r from-cyan-300 via-emerald-300 to-amber-300" />
             <CardHeader>
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start justify-between gap-4">
                 <div>
-                  <CardTitle className="text-white">AAPL Q4 2020 Signal</CardTitle>
-                  <CardDescription>
-                    Demo-ready financial NLP cockpit
+                  <p className="font-mono text-xs uppercase tracking-[0.16em] text-cyan-200">Verified analysis</p>
+                  <CardTitle className="mt-2 text-2xl text-white">
+                    {transcript.companyName ?? transcript.ticker ?? transcript.id}
+                  </CardTitle>
+                  <CardDescription className="mt-2">
+                    {transcript.ticker} · Q{transcript.fiscalQuarter} {transcript.fiscalYear} · {formatDate(transcript.earningsDate)}
                   </CardDescription>
                 </div>
-                <div className="sentiment-pulse rounded-full border border-emerald-400/30 bg-emerald-400/10 p-4">
-                  <Radar className="size-7 text-emerald-300" />
-                </div>
+                <span className="sentiment-pulse rounded-full border border-emerald-300/25 bg-emerald-300/10 p-3">
+                  <BrainCircuit aria-hidden className="size-6 text-emerald-200" />
+                </span>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div className="rounded-md border border-white/10 bg-white/[0.04] p-4">
-                  <p className="font-mono text-xs text-slate-400">Overall sentiment</p>
-                  <p className="mt-2 text-2xl font-semibold text-emerald-300">Positive</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+                  <p className="font-mono text-[11px] uppercase text-slate-400">FinBERT</p>
+                  <p className="mt-2 text-xl font-semibold text-emerald-200">{titleCase(analysis.finbert.direction)}</p>
+                  <p className="mt-1 text-xs text-slate-500">score {formatScore(analysis.finbert.score)}</p>
                 </div>
-                <div className="rounded-md border border-white/10 bg-white/[0.04] p-4">
-                  <p className="font-mono text-xs text-slate-400">Confidence</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">87%</p>
+                <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+                  <p className="font-mono text-[11px] uppercase text-slate-400">LM label</p>
+                  <p className="mt-2 text-xl font-semibold text-amber-200">{titleCase(analysis.loughranMcDonald.label)}</p>
+                  <p className="mt-1 text-xs text-slate-500">tone {formatScore(analysis.loughranMcDonald.toneScore)}</p>
                 </div>
-                <div className="rounded-md border border-white/10 bg-white/[0.04] p-4">
-                  <p className="font-mono text-xs text-slate-400">Market signal</p>
-                  <p className="mt-2 text-2xl font-semibold text-cyan-200">Bullish</p>
+                <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+                  <p className="font-mono text-[11px] uppercase text-slate-400">Agreement</p>
+                  <p className="mt-2 text-xl font-semibold text-cyan-200">
+                    {agreement === null ? "Unavailable" : agreement ? "Aligned" : "Divergent"}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">directional labels</p>
                 </div>
               </div>
-
-              <div className="mt-6 h-56">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={transcriptMoments}>
-                    <defs>
-                      <linearGradient id="heroSentiment" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.48} />
-                        <stop offset="95%" stopColor="#38bdf8" stopOpacity={0.02} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid stroke="rgba(148, 163, 184, 0.12)" vertical={false} />
-                    <XAxis dataKey="chunk" stroke="#64748b" tickLine={false} axisLine={false} />
-                    <YAxis hide domain={[0, 0.7]} />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Area
-                      type="monotone"
-                      dataKey="sentiment"
-                      stroke="#38bdf8"
-                      strokeWidth={3}
-                      fill="url(#heroSentiment)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+              <div className="mt-5 flex items-center gap-2 rounded-lg border border-emerald-300/15 bg-emerald-300/[0.05] p-3 text-sm text-slate-300">
+                <ShieldCheck aria-hidden className="size-4 shrink-0 text-emerald-200" />
+                Values are loaded from the checked JSON export—not generated in the browser.
               </div>
             </CardContent>
           </Card>
         </motion.div>
       </div>
 
-      <div className="relative mx-auto grid max-w-7xl gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        {heroMetrics.map((metric, index) => (
-          <HeroMetricCard key={metric.label} metric={metric} index={index} />
-        ))}
+      <div className="relative mx-auto mt-10 grid max-w-7xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard label="Verified events" value={formatInteger(data.dataset.observationCount)} detail={`${data.dataset.companyCount} company in the current artifact snapshot`} icon={Database} tone="cyan" />
+        <MetricCard label="Transcript chunks" value={formatInteger(transcript.chunkCount)} detail="Model-safe units aggregated into transcript-level sentiment" icon={Layers3} tone="emerald" />
+        <MetricCard label="Clean words" value={formatInteger(transcript.cleanWordCount)} detail="Words retained by the checked preprocessing pipeline" icon={FileText} tone="slate" />
+        <MetricCard label="Mean confidence" value={formatPercent(analysis.finbert.meanConfidence)} detail="Average confidence across the exported FinBERT analysis" icon={CheckCircle2} tone="amber" />
       </div>
     </section>
   );
 }
 
-function ProjectOverview() {
-  return (
-    <SectionShell
-      eyebrow="Project Overview"
-      title="A pipeline that turns raw earnings calls into market-aware sentiment features."
-      description="The dashboard mirrors the existing architecture: transcript ingestion, cleaning, chunking, FinBERT scoring, Loughran-McDonald dictionary signals, speaker analysis, event-study alignment, and predictive modeling hooks."
-    >
-      <div className="relative overflow-hidden rounded-lg border border-white/10 bg-slate-950/55 p-4 backdrop-blur-xl">
-        <div className="absolute left-8 right-8 top-1/2 hidden h-px bg-gradient-to-r from-cyan-400/10 via-cyan-300/70 to-emerald-400/10 lg:block" />
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {pipelineStages.map((stage, index) => (
-            <motion.div
-              key={stage.stage}
-              initial={{ opacity: 0, y: 24 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, amount: 0.2 }}
-              transition={{ duration: 0.45, delay: index * 0.04 }}
-              className="relative rounded-md border border-white/10 bg-slate-950/85 p-4"
-            >
-              <div className="mb-4 flex items-center justify-between">
-                <span className="font-mono text-xs text-cyan-300">{stage.stage}</span>
-                <span className="size-2 rounded-full bg-cyan-300 shadow-glow" />
-              </div>
-              <h3 className="text-base font-semibold text-white">{stage.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-400">{stage.description}</p>
-            </motion.div>
-          ))}
-        </div>
-      </div>
-    </SectionShell>
-  );
-}
+function Results({ analysis }: { analysis: AnalysisResult }) {
+  const sentimentDistribution = [
+    { name: "Positive", value: analysis.finbert.positiveProbability, color: chartColors.emerald },
+    { name: "Neutral", value: analysis.finbert.neutralProbability, color: chartColors.slate },
+    { name: "Negative", value: analysis.finbert.negativeProbability, color: chartColors.rose },
+  ].flatMap((item) => (item.value === null ? [] : [{ ...item, value: item.value * 100 }]));
 
-function SentimentEngine() {
+  const lmCounts = [
+    { name: "Positive", value: analysis.loughranMcDonald.positiveCount ?? 0, fill: chartColors.emerald },
+    { name: "Negative", value: analysis.loughranMcDonald.negativeCount ?? 0, fill: chartColors.rose },
+  ];
+
   return (
     <SectionShell
-      eyebrow="Sentiment Engine"
-      title="Contextual model scores and dictionary tone in one analyst view."
-      description="FinBERT captures earnings-call language in context, while Loughran-McDonald surfaces auditable financial tone categories."
+      eyebrow="Verified model output"
+      title="Contextual sentiment and dictionary tone, side by side."
+      description="Every number in this section is exported from the checked AAPL transcript artifact. The two methods agree on direction, while preserving their distinct scoring systems."
+      className="scroll-mt-20"
     >
-      <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-        <ChartPanel
-          title="FinBERT Sentiment Distribution"
-          description="Positive, neutral, and negative probability mix from the verified baseline call."
-        >
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={sentimentDistribution}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius={70}
-                  outerRadius={104}
-                  paddingAngle={4}
-                >
-                  {sentimentDistribution.map((slice) => (
-                    <Cell key={slice.name} fill={slice.color} />
-                  ))}
-                </Pie>
-                <Tooltip content={<ChartTooltip />} />
-                <Legend iconType="circle" />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+      <div id="results" className="grid scroll-mt-24 gap-6 lg:grid-cols-2">
+        <ChartPanel title="FinBERT probability mix" description="Transcript-level positive, neutral, and negative probabilities.">
+          {sentimentDistribution.length ? (
+            <div className="h-72" role="img" aria-label="FinBERT sentiment probability donut chart">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={sentimentDistribution} dataKey="value" nameKey="name" innerRadius={68} outerRadius={104} paddingAngle={4}>
+                    {sentimentDistribution.map((item) => <Cell key={item.name} fill={item.color} />)}
+                  </Pie>
+                  <Tooltip content={<ChartTooltip suffix="%" />} />
+                  <Legend iconType="circle" />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <EmptyPanel title="FinBERT probabilities unavailable" message="Regenerate the web data after producing transcript-level sentiment artifacts." />}
         </ChartPanel>
 
-        <ChartPanel
-          title="Loughran-McDonald Signal Categories"
-          description="Dictionary-based financial tone counts, mixing verified and clearly marked demo values."
-        >
-          <div className="h-72">
+        <ChartPanel title="Loughran–McDonald polarity counts" description="Explainable finance-dictionary matches in the same verified transcript.">
+          <div className="h-72" role="img" aria-label="Loughran-McDonald positive and negative word-count bar chart">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={lmCategories}>
+              <BarChart data={lmCounts}>
                 <CartesianGrid stroke="rgba(148, 163, 184, 0.12)" vertical={false} />
                 <XAxis dataKey="name" stroke="#94a3b8" tickLine={false} axisLine={false} />
-                <YAxis stroke="#64748b" tickLine={false} axisLine={false} />
+                <YAxis stroke="#64748b" tickLine={false} axisLine={false} allowDecimals={false} />
                 <Tooltip content={<ChartTooltip />} />
-                <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-                  {lmCategories.map((slice) => (
-                    <Cell key={slice.name} fill={slice.color} />
-                  ))}
+                <Bar dataKey="value" name="Word matches" radius={[7, 7, 0, 0]}>
+                  {lmCounts.map((item) => <Cell key={item.name} fill={item.fill} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -543,485 +458,371 @@ function SentimentEngine() {
         </ChartPanel>
       </div>
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {sentimentCards.map((card) => (
-          <SignalCard key={card.label} {...card} />
-        ))}
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard label="FinBERT score" value={formatScore(analysis.finbert.score)} detail="Positive probability minus negative probability" icon={BrainCircuit} tone="cyan" />
+        <MetricCard label="LM tone score" value={formatScore(analysis.loughranMcDonald.toneScore)} detail={`${formatInteger(analysis.loughranMcDonald.positiveCount)} positive and ${formatInteger(analysis.loughranMcDonald.negativeCount)} negative matches`} icon={LibraryBig} tone="amber" />
+        <MetricCard label="Score gap" value={formatScore(analysis.comparison.absoluteDifference)} detail="Absolute difference between the two transcript-level scores" icon={BarChart3} tone="slate" />
+        <MetricCard label="Directional result" value={analysis.comparison.directionalAgreement ? "Agreement" : "No agreement"} detail="Both exported labels are positive for this transcript" icon={CheckCircle2} tone="emerald" />
       </div>
     </SectionShell>
   );
 }
 
-function ModelComparison() {
+function TranscriptIntelligence({ analysis }: { analysis: AnalysisResult }) {
+  const topics = analysis.nlp.topics
+    .filter((topic) => (topic.count ?? 0) > 0)
+    .map((topic) => ({ ...topic, count: topic.count ?? 0 }));
+  const aggregate = analysis.speakerAnalysis.aggregate;
+
   return (
     <SectionShell
-      eyebrow="FinBERT vs Loughran-McDonald"
-      title="Two sentiment lenses: contextual intelligence and auditable financial dictionaries."
-      description="The dashboard keeps both views visible because institutional analysis benefits from model nuance and transparent category counts."
+      eyebrow="Transcript intelligence"
+      title="What the call discussed—and what the current export cannot claim."
+      description="Topic counts, uncertainty, and keywords come from the real advanced-NLP artifact. Speaker-level labels are surfaced only when the pipeline actually exports them."
     >
       <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-        <ChartPanel
-          title="Signal Capability Comparison"
-          description="Static scoring rubric for how each method contributes to a financial NLP product."
-        >
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={modelComparison}>
-                <CartesianGrid stroke="rgba(148, 163, 184, 0.12)" vertical={false} />
-                <XAxis dataKey="category" stroke="#94a3b8" tickLine={false} axisLine={false} />
-                <YAxis stroke="#64748b" tickLine={false} axisLine={false} domain={[0, 100]} />
-                <Tooltip content={<ChartTooltip />} />
-                <Legend />
-                <Bar dataKey="finbert" name="FinBERT" fill="#38bdf8" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="lm" name="LM Dictionary" fill="#f59e0b" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+        <ChartPanel title="Finance topic frequency" description="Matched topic terms across the verified transcript; categories can overlap.">
+          {topics.length ? (
+            <div className="h-80" role="img" aria-label="Financial topic-frequency horizontal bar chart">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={topics} layout="vertical" margin={{ left: 16 }}>
+                  <CartesianGrid stroke="rgba(148, 163, 184, 0.12)" horizontal={false} />
+                  <XAxis type="number" stroke="#64748b" tickLine={false} axisLine={false} allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" width={128} stroke="#94a3b8" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Bar dataKey="count" name="Term matches" fill={chartColors.cyan} radius={[0, 7, 7, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <EmptyPanel title="Topic data unavailable" message="The current JSON export contains no topic-frequency rows." />}
         </ChartPanel>
 
         <Card className="h-full">
           <CardHeader>
-            <CardTitle className="text-white">Comparison Notes</CardTitle>
-            <CardDescription>
-              What each engine contributes to the research workflow.
-            </CardDescription>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-white">Language fingerprint</CardTitle>
+                <CardDescription className="mt-2">Checked advanced-NLP features.</CardDescription>
+              </div>
+              <Code2 aria-hidden className="size-6 text-cyan-200" />
+            </div>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="finbert">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="finbert">FinBERT</TabsTrigger>
-                <TabsTrigger value="lm">LM</TabsTrigger>
-                <TabsTrigger value="bridge">Bridge</TabsTrigger>
-              </TabsList>
-              <TabsContent value="finbert" className="rounded-md border border-cyan-400/20 bg-cyan-400/10 p-4">
-                <BrainCircuit className="mb-3 size-6 text-cyan-200" />
-                <p className="text-sm leading-6 text-slate-200">
-                  FinBERT captures contextual financial language, including tone
-                  that depends on sentence structure, forward-looking statements,
-                  and earnings-call phrasing.
-                </p>
-              </TabsContent>
-              <TabsContent value="lm" className="rounded-md border border-amber-400/20 bg-amber-400/10 p-4">
-                <LibraryBig className="mb-3 size-6 text-amber-200" />
-                <p className="text-sm leading-6 text-slate-200">
-                  Loughran-McDonald captures dictionary-based financial tone,
-                  making uncertainty, litigation, constraint, positive, and
-                  negative words easy to inspect.
-                </p>
-              </TabsContent>
-              <TabsContent value="bridge" className="rounded-md border border-emerald-400/20 bg-emerald-400/10 p-4">
-                <Workflow className="mb-3 size-6 text-emerald-200" />
-                <p className="text-sm leading-6 text-slate-200">
-                  Together they create richer features for event studies and
-                  downstream market reaction modeling.
-                </p>
-              </TabsContent>
-            </Tabs>
-            <Separator className="my-6 bg-white/10" />
-            <div className="grid gap-3 font-mono text-sm">
-              <div className="flex items-center justify-between rounded-md bg-white/[0.04] p-3">
-                <span className="text-slate-400">FinBERT score</span>
-                <span className="text-cyan-200">0.432</span>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+              <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                <p className="font-mono text-xs uppercase text-slate-400">Tokens analyzed</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{formatInteger(analysis.nlp.totalTokens)}</p>
               </div>
-              <div className="flex items-center justify-between rounded-md bg-white/[0.04] p-3">
-                <span className="text-slate-400">LM tone score</span>
-                <span className="text-amber-200">0.492</span>
+              <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                <p className="font-mono text-xs uppercase text-slate-400">Uncertainty</p>
+                <p className="mt-2 text-2xl font-semibold text-amber-200">{formatInteger(analysis.nlp.uncertaintyCount)} hits</p>
+                <p className="mt-1 text-xs text-slate-500">{formatPercent(analysis.nlp.uncertaintyRatio, 2)} of tokens</p>
               </div>
-              <div className="flex items-center justify-between rounded-md bg-white/[0.04] p-3">
-                <span className="text-slate-400">Label agreement</span>
-                <span className="text-emerald-200">Positive</span>
+            </div>
+            <div className="mt-6">
+              <p className="text-sm font-medium text-white">Top exported keywords</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {analysis.nlp.topKeywords.length ? analysis.nlp.topKeywords.map((keyword) => (
+                  <Badge key={keyword} variant="outline" className="border-cyan-300/20 bg-cyan-300/[0.07] font-mono text-cyan-100">
+                    {keyword}
+                  </Badge>
+                )) : <span className="text-sm text-slate-400">No keyword artifact available.</span>}
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      <Card className="mt-6 border-amber-300/20">
+        <CardContent className="grid gap-6 p-6 md:grid-cols-[1fr_auto] md:items-center">
+          <div>
+            <div className="flex items-center gap-2">
+              <CircleAlert aria-hidden className="size-5 text-amber-200" />
+              <h3 className="font-semibold text-white">Speaker-level availability</h3>
+            </div>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">{analysis.speakerAnalysis.message}</p>
+            <p className="mt-2 text-sm text-slate-500">EarningsLens does not infer CEO, CFO, analyst, or section values when labels are absent.</p>
+          </div>
+          {aggregate ? (
+            <div className="grid min-w-72 grid-cols-2 gap-3">
+              <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+                <p className="font-mono text-[11px] uppercase text-slate-500">Aggregate score</p>
+                <p className="mt-2 text-xl font-semibold text-white">{formatScore(aggregate.averageSentimentScore)}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
+                <p className="font-mono text-[11px] uppercase text-slate-500">Chunk mix</p>
+                <p className="mt-2 text-sm font-medium text-white">
+                  {formatInteger(aggregate.positiveChunks)} positive · {formatInteger(aggregate.neutralChunks)} neutral
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
     </SectionShell>
   );
 }
 
-function TranscriptIntelligence() {
-  const sectionLabels = ["Prepared Remarks", "Financial Results", "Guidance", "Q&A"];
+function MarketReaction({ analysis }: { analysis: AnalysisResult }) {
+  const marketData = analysis.marketReaction.windows.map((window) => ({
+    label: window.label,
+    "Raw return": window.rawReturn === null ? null : window.rawReturn * 100,
+    "Abnormal return": window.abnormalReturn === null ? null : window.abnormalReturn * 100,
+  }));
 
   return (
     <SectionShell
-      eyebrow="Transcript Intelligence"
-      title="Chunk-level sentiment reveals how tone changes across the call."
-      description="The timeline separates prepared remarks, financial results, guidance, and Q&A so the dashboard can show where optimism or caution enters the call."
+      eyebrow="Event study"
+      title="Post-earnings returns are shown as measured windows, not a prediction."
+      description="Raw and abnormal returns are exported from the market-alignment layer. CAR values are displayed separately because they use the event-study pipeline’s additive definition."
+      className="scroll-mt-20"
     >
-      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-        <ChartPanel
-          title="Sentiment by Transcript Chunk"
-          description="Static demo timeline built for future transcript-level interactivity."
-        >
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={transcriptMoments}>
-                <CartesianGrid stroke="rgba(148, 163, 184, 0.12)" vertical={false} />
-                <XAxis dataKey="chunk" stroke="#94a3b8" tickLine={false} axisLine={false} />
-                <YAxis stroke="#64748b" tickLine={false} axisLine={false} domain={[0, 0.7]} />
-                <Tooltip content={<ChartTooltip />} />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="sentiment"
-                  name="Sentiment"
-                  stroke="#22c55e"
-                  strokeWidth={3}
-                  dot={{ r: 4, fill: "#22c55e" }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="confidence"
-                  name="Confidence"
-                  stroke="#38bdf8"
-                  strokeWidth={2}
-                  strokeDasharray="4 4"
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+      <div id="market-reaction" className="grid scroll-mt-24 gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+        <ChartPanel title="Return horizons" description="Observed forward-return and abnormal-return values for the verified event.">
+          {marketData.length ? (
+            <div className="h-80" role="img" aria-label="Raw and abnormal return by post-earnings horizon bar chart">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={marketData}>
+                  <CartesianGrid stroke="rgba(148, 163, 184, 0.12)" vertical={false} />
+                  <XAxis dataKey="label" stroke="#94a3b8" tickLine={false} axisLine={false} />
+                  <YAxis stroke="#64748b" tickLine={false} axisLine={false} tickFormatter={(value) => `${value}%`} />
+                  <Tooltip content={<ChartTooltip suffix="%" />} />
+                  <Legend />
+                  <Bar dataKey="Raw return" fill={chartColors.slate} radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="Abnormal return" fill={chartColors.cyan} radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <EmptyPanel title="Market windows unavailable" message="No return horizons were present in the checked master dataset." />}
         </ChartPanel>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-white">Call Sections</CardTitle>
-            <CardDescription>
-              Storytelling labels for transcript progression.
-            </CardDescription>
+            <CardTitle className="text-white">Event-study snapshot</CardTitle>
+            <CardDescription>Verified event and cumulative abnormal returns.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {sectionLabels.map((section, index) => (
-              <motion.div
-                key={section}
-                initial={{ opacity: 0, x: 18 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true, amount: 0.3 }}
-                transition={{ duration: 0.45, delay: index * 0.08 }}
-                className="rounded-md border border-white/10 bg-white/[0.04] p-4"
-              >
+            <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <p className="font-mono text-xs uppercase text-slate-500">Aligned market event</p>
+              <p className="mt-2 text-xl font-semibold text-white">{formatDate(analysis.marketReaction.eventDate)}</p>
+              <p className="mt-2 text-xs text-slate-500">
+                Source window {formatDate(analysis.marketReaction.marketWindowStart)} – {formatDate(analysis.marketReaction.marketWindowEnd)}
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+              {analysis.marketReaction.cumulativeAbnormalReturns.map((item) => (
+                <div key={item.label} className="rounded-lg border border-emerald-300/20 bg-emerald-300/[0.06] p-4">
+                  <p className="font-mono text-xs uppercase text-emerald-100">{item.label}</p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{formatPercent(item.value, 2)}</p>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-lg border border-amber-300/20 bg-amber-300/[0.06] p-4 text-sm leading-6 text-slate-300">
+              A single event cannot establish statistical significance, causality, or an investable relationship. These values demonstrate the pipeline contract only.
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </SectionShell>
+  );
+}
+
+function ArchitectureAndModeling({ data }: { data: DashboardData }) {
+  return (
+    <SectionShell
+      eyebrow="Deployment architecture"
+      title="Heavy research runs offline; the web request stays lightweight."
+      description="The Vercel application serves a static Next.js interface and a small JSON artifact. FinBERT inference, transcript processing, market downloads, and training remain explicit Python batch jobs."
+      className="scroll-mt-20"
+    >
+      <div id="architecture" className="grid scroll-mt-24 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {pipelineStages.map((stage, index) => (
+          <motion.div key={stage.stage} initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: index * 0.04 }}>
+            <Card className="h-full">
+              <CardContent className="p-5">
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-white">{section}</span>
-                  <Badge variant="outline" className="border-cyan-400/25 bg-cyan-400/10 font-mono text-cyan-200">
-                    phase {index + 1}
-                  </Badge>
+                  <span className="font-mono text-xs text-cyan-200">{stage.stage}</span>
+                  <Badge variant="outline" className="border-white/10 bg-white/[0.04] font-mono text-slate-300">{stage.runtime}</Badge>
                 </div>
-                <p className="mt-2 text-sm leading-6 text-slate-400">
-                  {index === 0
-                    ? "Management frames the quarter and sets the strategic tone."
-                    : index === 1
-                      ? "Revenue, margin, and product performance language enters."
-                      : index === 2
-                        ? "Forward-looking language drives uncertainty and signal strength."
-                        : "Analyst scrutiny tests whether positive tone survives questions."}
-                </p>
-              </motion.div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-    </SectionShell>
-  );
-}
-
-function SpeakerAwareInsights() {
-  return (
-    <SectionShell
-      eyebrow="Speaker-Aware Insights"
-      title="Management tone and analyst pressure are separated into research-ready signals."
-      description="Speaker-level cards compare CEO sentiment, CFO sentiment, analyst Q&A sentiment, and aggregate management tone."
-    >
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {speakerInsights.map((speaker) => {
-          const style = toneStyles[speaker.tone];
-
-          return (
-            <Card key={speaker.speaker} className={cn("overflow-hidden", style.border)}>
-              <CardContent className="p-5">
-                <div className="mb-4 flex items-center justify-between">
-                  <Badge variant="outline" className={cn(style.border, style.bg, style.text)}>
-                    {speaker.role}
-                  </Badge>
-                  <UsersRound className={cn("size-5", style.text)} />
-                </div>
-                <h3 className="text-xl font-semibold text-white">{speaker.speaker}</h3>
-                <div className="mt-5 space-y-4">
-                  <div>
-                    <div className="mb-2 flex justify-between font-mono text-xs text-slate-400">
-                      <span>sentiment</span>
-                      <span className={style.text}>{speaker.sentiment}%</span>
-                    </div>
-                    <Progress value={speaker.sentiment} />
-                  </div>
-                  <div>
-                    <div className="mb-2 flex justify-between font-mono text-xs text-slate-400">
-                      <span>confidence</span>
-                      <span className="text-cyan-200">{speaker.confidence}%</span>
-                    </div>
-                    <Progress value={speaker.confidence} />
-                  </div>
-                </div>
-                <p className="mt-5 text-sm leading-6 text-slate-400">{speaker.note}</p>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-    </SectionShell>
-  );
-}
-
-function EventStudy() {
-  return (
-    <SectionShell
-      eyebrow="Event Study / Market Reaction"
-      title="Sentiment becomes more useful when it is compared with post-earnings movement."
-      description="The event-study view aligns abnormal return and cumulative abnormal return windows around the earnings event."
-    >
-      <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-        <ChartPanel
-          title="Abnormal Return and CAR Window"
-          description="Sample static data showing how a bullish call could be evaluated against market reaction."
-        >
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={eventStudyData}>
-                <defs>
-                  <linearGradient id="carFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.38} />
-                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="rgba(148, 163, 184, 0.12)" vertical={false} />
-                <XAxis dataKey="day" stroke="#94a3b8" tickLine={false} axisLine={false} />
-                <YAxis stroke="#64748b" tickLine={false} axisLine={false} />
-                <Tooltip content={<ChartTooltip />} />
-                <Legend />
-                <Area
-                  type="monotone"
-                  dataKey="car"
-                  name="CAR %"
-                  stroke="#22c55e"
-                  strokeWidth={3}
-                  fill="url(#carFill)"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="abnormalReturn"
-                  name="Abnormal return %"
-                  stroke="#38bdf8"
-                  strokeWidth={2}
-                  dot={{ r: 3, fill: "#38bdf8" }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </ChartPanel>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-white">Market Interpretation</CardTitle>
-            <CardDescription>
-              How a sentiment dashboard supports financial research.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm leading-6 text-slate-300">
-            <div className="rounded-md border border-emerald-400/20 bg-emerald-400/10 p-4">
-              <p className="font-medium text-emerald-200">Positive language plus positive CAR</p>
-              <p className="mt-2 text-slate-300">
-                A constructive management tone can be compared with abnormal
-                returns to evaluate whether the market rewarded the narrative.
-              </p>
-            </div>
-            <div className="rounded-md border border-cyan-400/20 bg-cyan-400/10 p-4">
-              <p className="font-medium text-cyan-200">Feature bridge</p>
-              <p className="mt-2 text-slate-300">
-                FinBERT scores, LM tone, uncertainty ratios, and speaker
-                signals can become inputs for post-earnings direction models.
-              </p>
-            </div>
-            <div className="rounded-md border border-amber-400/20 bg-amber-400/10 p-4">
-              <p className="font-medium text-amber-200">Current caveat</p>
-              <p className="mt-2 text-slate-300">
-                Verified artifacts currently show n=1, so the dashboard uses
-                static demo visuals for recruiter-friendly product storytelling.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </SectionShell>
-  );
-}
-
-function PredictiveModeling() {
-  return (
-    <SectionShell
-      eyebrow="Predictive Modeling"
-      title="Modeling cards show the intended ML contract without overstating current sample size."
-      description="The project includes feature engineering and model metric surfaces, with evaluation guarded until more observations are available."
-    >
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {predictiveCards.map((card, index) => (
-          <motion.div
-            key={card.label}
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.25 }}
-            transition={{ duration: 0.45, delay: index * 0.06 }}
-          >
-            <Card className="h-full overflow-hidden">
-              <CardContent className="p-5">
-                <div className="mb-5 flex items-center justify-between">
-                  <Cpu className="size-5 text-cyan-200" />
-                  <Badge variant="outline" className="border-slate-400/20 bg-slate-400/10 font-mono text-slate-300">
-                    {card.status}
-                  </Badge>
-                </div>
-                <p className="text-sm text-slate-400">{card.label}</p>
-                <p className="mt-2 text-2xl font-semibold text-white">{card.value}</p>
-                <p className="mt-4 text-sm leading-6 text-slate-400">{card.detail}</p>
+                <h3 className="mt-5 font-semibold text-white">{stage.title}</h3>
+                <p className="mt-3 text-sm leading-6 text-slate-400">{stage.description}</p>
               </CardContent>
             </Card>
           </motion.div>
         ))}
       </div>
-    </SectionShell>
-  );
-}
 
-function InteractiveDemo() {
-  return (
-    <SectionShell
-      eyebrow="Interactive Earnings Call Demo"
-      title="A polished Apple Q4 2020 signal card for interview walkthroughs."
-      description="This static card demonstrates what a future interactive call analysis experience could feel like once more transcripts are loaded."
-      className="scroll-mt-8"
-    >
-      <Card id="interactive-demo" className="overflow-hidden border-cyan-400/20">
-        <div className="h-1 bg-gradient-to-r from-cyan-300 via-emerald-300 to-amber-300" />
-        <CardContent className="grid gap-8 p-6 lg:grid-cols-[0.82fr_1.18fr] lg:p-8">
-          <div>
-            <Badge variant="outline" className="border-cyan-400/30 bg-cyan-400/10 font-mono text-cyan-200">
-              Apple Inc. · Q4 2020
-            </Badge>
-            <h3 className="mt-5 text-3xl font-semibold text-white">Overall Sentiment: Positive</h3>
-            <p className="mt-4 text-sm leading-7 text-slate-300">
-              Confidence is high, uncertainty language is low, and the market
-              reaction signal is presented as bullish for demo purposes.
-            </p>
-
-            <div className="mt-8 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-md border border-emerald-400/20 bg-emerald-400/10 p-4">
-                <p className="font-mono text-xs text-emerald-200">Confidence</p>
-                <p className="mt-2 text-3xl font-semibold text-white">87%</p>
-              </div>
-              <div className="rounded-md border border-cyan-400/20 bg-cyan-400/10 p-4">
-                <p className="font-mono text-xs text-cyan-200">Market Signal</p>
-                <p className="mt-2 text-3xl font-semibold text-white">Bullish</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-md border border-white/10 bg-white/[0.04] p-4">
-            <div className="mb-4 flex items-center justify-between">
+      <div className="mt-8 grid gap-6 lg:grid-cols-[0.82fr_1.18fr]">
+        <Card className="border-violet-300/20">
+          <CardHeader>
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-white">Key Drivers</p>
-                <p className="text-xs text-slate-400">Static driver table for the demo experience</p>
+                <CardTitle className="text-white">Model readiness</CardTitle>
+                <CardDescription className="mt-2">Guarded by the actual sample size.</CardDescription>
               </div>
-              <ShieldCheck className="size-5 text-emerald-300" />
+              <Cpu aria-hidden className="size-6 text-violet-200" />
             </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                <p className="font-mono text-[11px] uppercase text-slate-500">Features</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{formatInteger(data.modeling.featureCount)}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                <p className="font-mono text-[11px] uppercase text-slate-500">Models trained</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{data.modeling.modelsTrained}</p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] p-4">
+              <p className="font-medium text-amber-100">{titleCase(data.modeling.status)}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">{data.modeling.message}</p>
+              <p className="mt-2 text-xs text-slate-500">{data.modeling.modelsAttempted} guarded model/target combinations recorded.</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-white">Artifact provenance</CardTitle>
+                <CardDescription className="mt-2">Repository sources used by the deployment export.</CardDescription>
+              </div>
+              <Workflow aria-hidden className="size-6 text-cyan-200" />
+            </div>
+          </CardHeader>
+          <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Driver</TableHead>
-                  <TableHead>Impact</TableHead>
+                  <TableHead>Layer</TableHead>
+                  <TableHead>Checked source</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {demoDrivers.map((driver) => (
-                  <TableRow key={driver.driver}>
-                    <TableCell className="font-medium text-white">{driver.driver}</TableCell>
-                    <TableCell className="font-mono text-emerald-200">{driver.impact}</TableCell>
+                {data.provenance.map((item) => (
+                  <TableRow key={item.path}>
+                    <TableCell className="font-medium text-white">{item.label}</TableCell>
+                    <TableCell className="break-all font-mono text-xs text-slate-400">{item.path}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     </SectionShell>
   );
 }
 
-function InsightsAndCta() {
+function Footer() {
   return (
-    <SectionShell
-      eyebrow="Insights Summary"
-      title="What EarningsLens proves as a portfolio project."
-      description="The product story highlights financial NLP architecture, event-study framing, speaker-aware analytics, and investment research UX."
-    >
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        {insightCards.map((insight) => {
-          return (
-            <Card key={insight.title} className="h-full">
-              <CardContent className="p-5">
-                <div className="mb-4 flex size-10 items-center justify-center rounded-md border border-cyan-400/25 bg-cyan-400/10">
-                  <DashboardIcon name={insight.icon} className="size-5 text-cyan-200" />
-                </div>
-                <h3 className="text-base font-semibold text-white">{insight.title}</h3>
-                <p className="mt-3 text-sm leading-6 text-slate-400">{insight.description}</p>
-              </CardContent>
-            </Card>
-          );
-        })}
+    <footer className="border-t border-white/10 bg-slate-950/60">
+      <div className="mx-auto grid max-w-7xl gap-8 px-4 py-12 sm:px-6 md:grid-cols-[1fr_auto] md:items-end lg:px-8">
+        <div>
+          <div className="flex items-center gap-2 text-lg font-semibold text-white">
+            <LineChartIcon aria-hidden className="size-5 text-cyan-200" />
+            EarningsLens
+          </div>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
+            A financial NLP research platform. Demonstration outputs are descriptive and are not investment advice.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          {repositoryLinks.map((link) => (
+            <a key={link.href} href={link.href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-slate-300 transition hover:text-white">
+              {link.label}
+              <ArrowUpRight aria-hidden className="size-3.5" />
+            </a>
+          ))}
+        </div>
       </div>
+    </footer>
+  );
+}
 
-      <Card className="mt-8 overflow-hidden border-emerald-400/20">
-        <CardContent className="grid gap-6 p-6 lg:grid-cols-[1fr_auto] lg:items-center">
-          <div>
-            <Badge variant="outline" className="border-emerald-400/30 bg-emerald-400/10 font-mono text-emerald-200">
-              GitHub CTA
-            </Badge>
-            <h3 className="mt-4 text-2xl font-semibold text-white">Explore the project source and methodology.</h3>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
-              The web dashboard is a static-first presentation layer over the
-              existing Python NLP and event-study workflow.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {ctaLinks.map((link) => {
-              return (
-                <Button key={link.href} asChild variant="outline" className="border-white/15 bg-white/5">
-                  <a href={link.href} target="_blank" rel="noreferrer">
-                    <DashboardIcon name={link.icon} className="size-4" />
-                    {link.label}
-                    <ExternalLink className="size-3.5" />
-                  </a>
-                </Button>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-    </SectionShell>
+function DashboardContent({ data }: { data: DashboardData }) {
+  const [selectedId, setSelectedId] = useState(data.analyses[0]?.transcript.id ?? "");
+  const analysis = useMemo(
+    () => data.analyses.find((item) => item.transcript.id === selectedId) ?? data.analyses[0],
+    [data.analyses, selectedId],
+  );
+
+  if (!analysis) {
+    return <ErrorDashboard message="The JSON artifact is valid but contains no analysis rows." retry={() => window.location.reload()} />;
+  }
+
+  return (
+    <main className="min-h-screen overflow-hidden bg-[#050816]">
+      <SiteHeader />
+      {data.analyses.length > 1 ? (
+        <div className="mx-auto max-w-7xl px-4 pt-6 sm:px-6 lg:px-8">
+          <label htmlFor="analysis-selector" className="text-sm font-medium text-slate-200">Analysis</label>
+          <select id="analysis-selector" value={selectedId} onChange={(event) => setSelectedId(event.target.value)} className="ml-3 rounded-md border border-white/15 bg-slate-950 px-3 py-2 text-sm text-white">
+            {data.analyses.map((item) => <option key={item.transcript.id} value={item.transcript.id}>{item.transcript.ticker ?? item.transcript.id}</option>)}
+          </select>
+        </div>
+      ) : null}
+      <Hero data={data} analysis={analysis} />
+      <Results analysis={analysis} />
+      <TranscriptIntelligence analysis={analysis} />
+      <MarketReaction analysis={analysis} />
+      <ArchitectureAndModeling data={data} />
+      <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
+        <Card className="overflow-hidden border-cyan-300/20">
+          <CardContent className="grid gap-6 p-6 md:grid-cols-[1fr_auto] md:items-center lg:p-8">
+            <div>
+              <Badge variant="outline" className="border-cyan-300/25 bg-cyan-300/[0.08] font-mono text-cyan-100">Inspect the implementation</Badge>
+              <h2 className="mt-4 text-2xl font-semibold text-white">Research code, deployment contract, and methodology are public.</h2>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">Regenerate the JSON after an offline pipeline run, commit the artifact, and let the connected Vercel project publish the updated dashboard.</p>
+            </div>
+            <Button asChild size="lg" className="bg-cyan-300 text-slate-950 hover:bg-cyan-200">
+              <a href="https://github.com/imayankss/EarningsLens" target="_blank" rel="noreferrer">
+                View repository
+                <ChevronRight aria-hidden className="size-4" />
+              </a>
+            </Button>
+          </CardContent>
+        </Card>
+      </section>
+      <Footer />
+    </main>
   );
 }
 
 export function EarningsLensDashboard() {
-  return (
-    <main className="relative min-h-screen overflow-hidden bg-[#050816]">
-      <HeroSection />
-      <FinanceTicker items={tickerMovements} />
-      <ProjectOverview />
-      <SentimentEngine />
-      <ModelComparison />
-      <TranscriptIntelligence />
-      <SpeakerAwareInsights />
-      <EventStudy />
-      <PredictiveModeling />
-      <InteractiveDemo />
-      <InsightsAndCta />
-    </main>
-  );
+  const [requestKey, setRequestKey] = useState(0);
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadData() {
+      try {
+        const response = await fetch(DATA_URL, { signal: controller.signal, cache: "force-cache" });
+        if (!response.ok) throw new Error(`Data request returned HTTP ${response.status}.`);
+        const payload: unknown = await response.json();
+        if (!isDashboardData(payload)) throw new Error("The dashboard data contract is invalid or unsupported.");
+        setData(payload);
+      } catch (caught) {
+        if (controller.signal.aborted) return;
+        setError(caught instanceof Error ? caught.message : "An unexpected data-loading error occurred.");
+      }
+    }
+
+    void loadData();
+    return () => controller.abort();
+  }, [requestKey]);
+
+  function retry() {
+    setData(null);
+    setError(null);
+    setRequestKey((value) => value + 1);
+  }
+
+  if (error) return <ErrorDashboard message={error} retry={retry} />;
+  if (!data) return <LoadingDashboard />;
+  return <DashboardContent data={data} />;
 }

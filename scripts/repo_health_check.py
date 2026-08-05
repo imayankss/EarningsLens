@@ -18,20 +18,23 @@ from src.utils.io_utils import read_table  # noqa: E402
 
 KEY_SOURCE_FILES = [
     "app.py",
+    "scripts/export_web_data.py",
     "src/analysis/sentiment_model_comparison.py",
     "src/analysis/master_dataset_builder.py",
     "src/analysis/statistical_analysis.py",
     "src/visualization/professional_charts.py",
     "src/nlp/advanced_nlp.py",
     "src/models/predictive_model.py",
+    "web/app/page.tsx",
 ]
 
 KEY_OUTPUT_ARTIFACTS = [
     "data/processed/master_dataset.parquet",
     "data/processed/master_dataset.csv",
-    "data/processed/analysis/sentiment_model_comparison.parquet",
+    "reports/tables/sentiment_model_comparison.csv",
     "data/processed/nlp/advanced_nlp_features.parquet",
     "models/predictive_model_metadata.json",
+    "web/public/data/dashboard.json",
 ]
 
 KEY_REPORTS = [
@@ -67,6 +70,7 @@ KEY_TESTS = [
     "tests/test_advanced_nlp.py",
     "tests/test_predictive_model.py",
     "tests/test_streamlit_app.py",
+    "tests/test_web_export.py",
 ]
 
 

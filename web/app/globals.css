@@ -43,6 +43,17 @@ body {
     "calt" 1;
 }
 
+a,
+button,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid rgba(103, 232, 249, 0.95);
+  outline-offset: 3px;
+}
+
 ::selection {
   background: rgba(56, 189, 248, 0.28);
   color: #f8fafc;
@@ -106,5 +117,20 @@ body {
     box-shadow:
       0 0 0 14px rgba(34, 197, 94, 0),
       0 0 52px rgba(34, 197, 94, 0.22);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }

@@ -4,12 +4,17 @@ node_modules/
 # Next.js
 .next/
 out/
+*.tsbuildinfo
 
 # Production
 build/
 
+# Vercel local project link
+.vercel/
+
 # Local environment
-.env*.local
+.env*
+!.env.example
 
 # Logs
 npm-debug.log*

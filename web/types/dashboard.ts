@@ -1,14 +1,4 @@
-import type { LucideIcon } from "lucide-react";
-
 export type SentimentTone = "positive" | "negative" | "neutral" | "warning";
-
-export type HeroMetric = {
-  label: string;
-  value: string;
-  detail: string;
-  tone: SentimentTone;
-  icon: string;
-};
 
 export type TickerMovement = {
   symbol: string;
@@ -22,71 +12,125 @@ export type PipelineStage = {
   stage: string;
   title: string;
   description: string;
+  runtime: string;
 };
 
-export type SentimentSlice = {
-  name: string;
-  value: number;
-  color: string;
-};
-
-export type SentimentCard = {
-  label: string;
-  value: string;
-  description: string;
-  tone: SentimentTone;
-};
-
-export type ModelComparisonPoint = {
-  category: string;
-  finbert: number;
-  lm: number;
-};
-
-export type TranscriptMoment = {
-  chunk: number;
-  section: string;
-  sentiment: number;
-  confidence: number;
-};
-
-export type SpeakerInsight = {
-  speaker: string;
-  role: string;
-  sentiment: number;
-  confidence: number;
-  tone: SentimentTone;
-  note: string;
-};
-
-export type EventStudyPoint = {
-  day: string;
-  abnormalReturn: number;
-  car: number;
-};
-
-export type PredictiveCard = {
-  label: string;
-  value: string;
-  status: string;
-  detail: string;
-};
-
-export type DemoDriver = {
-  driver: string;
-  impact: string;
-};
-
-export type InsightCard = {
-  title: string;
-  description: string;
-  icon: string;
-};
-
-export type CtaLink = {
+export type RepositoryLink = {
   label: string;
   href: string;
-  icon: string;
 };
 
-export type IconMap = Record<string, LucideIcon>;
+export type TranscriptSummary = {
+  id: string;
+  ticker: string | null;
+  companyName: string | null;
+  earningsDate: string | null;
+  fiscalQuarter: number | null;
+  fiscalYear: number | null;
+  cleanWordCount: number | null;
+  chunkCount: number | null;
+};
+
+export type FinbertResult = {
+  score: number | null;
+  positiveProbability: number | null;
+  negativeProbability: number | null;
+  neutralProbability: number | null;
+  meanConfidence: number | null;
+  direction: string | null;
+};
+
+export type LoughranMcDonaldResult = {
+  toneScore: number | null;
+  positiveCount: number | null;
+  negativeCount: number | null;
+  scoredWordCount: number | null;
+  label: string | null;
+};
+
+export type ModelComparison = {
+  directionalAgreement: boolean | null;
+  scoreDifference: number | null;
+  absoluteDifference: number | null;
+};
+
+export type MarketWindow = {
+  label: string;
+  horizonDays: number;
+  rawReturn: number | null;
+  abnormalReturn: number | null;
+};
+
+export type CumulativeAbnormalReturn = {
+  label: string;
+  horizonDays: number;
+  value: number;
+};
+
+export type TopicResult = {
+  name: string;
+  count: number | null;
+  ratio: number | null;
+};
+
+export type SpeakerGroup = {
+  label: string | null;
+  chunkCount: number | null;
+  averageSentimentScore: number | null;
+  sentimentStdDev: number | null;
+  positiveChunks: number | null;
+  negativeChunks: number | null;
+  neutralChunks: number | null;
+};
+
+export type AnalysisResult = {
+  transcript: TranscriptSummary;
+  finbert: FinbertResult;
+  loughranMcDonald: LoughranMcDonaldResult;
+  comparison: ModelComparison;
+  marketReaction: {
+    eventDate: string | null;
+    windows: MarketWindow[];
+    cumulativeAbnormalReturns: CumulativeAbnormalReturn[];
+    marketWindowStart: string | null;
+    marketWindowEnd: string | null;
+  };
+  nlp: {
+    totalTokens: number | null;
+    uncertaintyCount: number | null;
+    uncertaintyRatio: number | null;
+    topKeywords: string[];
+    topics: TopicResult[];
+  };
+  speakerAnalysis: {
+    available: boolean;
+    groups: SpeakerGroup[];
+    aggregate: SpeakerGroup | null;
+    message: string;
+  };
+};
+
+export type DashboardData = {
+  schemaVersion: number;
+  dataset: {
+    kind: "demonstration" | "research";
+    label: string;
+    observationCount: number;
+    companyCount: number;
+    isLimited: boolean;
+    notice: string;
+  };
+  analyses: AnalysisResult[];
+  modeling: {
+    observationCount: number | null;
+    featureCount: number | null;
+    modelsAttempted: number;
+    modelsTrained: number;
+    status: string;
+    message: string;
+  };
+  provenance: Array<{
+    label: string;
+    path: string;
+  }>;
+};

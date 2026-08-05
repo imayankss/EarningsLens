@@ -11,14 +11,15 @@ The project now includes **EarningsLens**, a premium dark fintech web dashboard 
 - **Modern web dashboard:** `web/`
 - **Framework:** Next.js App Router, TypeScript, Tailwind CSS
 - **UI/animation:** shadcn-style components, Recharts, Framer Motion, lucide-react
-- **Data mode:** static TypeScript data in `web/data/`
-- **Pipeline safety:** no backend calls and no changes to the core Python NLP workflow
+- **Data mode:** precomputed JSON in `web/public/data/dashboard.json`
+- **Pipeline safety:** no model inference, training, transcript ingestion, or market downloads during builds or requests
 
 Run it locally:
 
 ```bash
+python3 scripts/export_web_data.py
 cd web
-npm install
+npm ci
 npm run dev
 ```
 
@@ -47,10 +48,10 @@ Earnings calls contain forward-looking language, uncertainty, and management ton
 - Event-study returns and abnormal returns across 1D, 2D, 3D, 5D, and 10D windows.
 - Master ML-ready dataset builder.
 - Guarded statistical analysis with explicit `n=1` warnings.
-- Advanced NLP features: keywords, topics, bigrams, uncertainty, speaker/section sentiment.
+- Advanced NLP features: keywords, topics, bigrams, uncertainty, and speaker/section sentiment when source labels are available.
 - Prediction modeling module that skips training when data is insufficient.
 - Professional PNG figures and a minimalist Streamlit dashboard.
-- Static-first EarningsLens web dashboard with animated hero, ticker strip, sentiment charts, model comparison, transcript timeline, speaker insights, event-study panel, and recruiter-friendly CTA links.
+- Static-first EarningsLens web dashboard with verified sentiment charts, topic features, honest speaker-data availability, event-study panels, artifact provenance, and recruiter-friendly project links.
 - Repository health check script for GitHub readiness.
 
 ## Tech Stack
@@ -80,7 +81,9 @@ flowchart LR
     J --> M[Streamlit research dashboard]
     K --> M
     L --> M
-    L --> N[EarningsLens static web dashboard]
+    H --> N[Deployment-safe JSON export]
+    K --> N
+    N --> O[EarningsLens static web dashboard]
 ```
 
 See [docs/architecture.md](docs/architecture.md) for a fuller module map and artifact map.
@@ -100,9 +103,10 @@ app.py              Streamlit dashboard
 web/                Next.js EarningsLens dashboard
   app/              App Router page and layout
   components/       Dashboard sections and UI primitives
-  data/             Static TypeScript dashboard data
+  data/             Static product and architecture copy
+  public/data/      Versioned deployment-safe JSON artifacts
   types/            Dashboard TypeScript types
-scripts/            Pipeline runners and repo health check
+scripts/            Pipeline runners, web exporter, and repo health check
 data/processed/     Generated processed artifacts
 reports/tables/     Generated CSV report tables
 reports/figures/    Generated PNG figures
@@ -136,7 +140,7 @@ Install the web dashboard dependencies separately:
 
 ```bash
 cd web
-npm install
+npm ci
 ```
 
 ## Run the Pipeline
@@ -163,6 +167,14 @@ Run tests:
 python3 -m pytest -q
 ```
 
+Regenerate the deployment-safe web artifact after the pipeline outputs change:
+
+```bash
+python3 scripts/export_web_data.py
+```
+
+The exporter reads existing CSV/JSON artifacts only. It does not load transformer weights, call market-data providers, or train a model. It converts unsupported and non-finite values to JSON-safe values and writes `web/public/data/dashboard.json`.
+
 ## Run the Dashboards
 
 ### Streamlit Research Dashboard
@@ -176,6 +188,7 @@ The dashboard includes Overview, Sentiment Analysis, Event Study, Advanced NLP, 
 ### EarningsLens Web Dashboard
 
 ```bash
+python3 scripts/export_web_data.py
 cd web
 npm run dev
 ```
@@ -186,24 +199,28 @@ Production checks:
 
 ```bash
 cd web
+npm run validate:data
 npm run lint
+npm run typecheck
+npm test
 npm run build
 ```
 
-The web dashboard is static-first and uses local TypeScript data from `web/data/`. It does not call a backend or modify the Python NLP pipeline.
+The web dashboard is static-first and fetches the checked JSON artifact from `/data/dashboard.json`. It does not call a backend or modify the Python NLP pipeline.
+
+### Environment Variables
+
+No environment variables are required for the checked Python workflow or the current static web deployment. Vercel’s system-provided production URL is used for absolute social metadata. Future private provider credentials must remain server-side and must never use a `NEXT_PUBLIC_*` name.
 
 ## EarningsLens Web Sections
 
-- Hero with animated metric cards for transcripts, chunks, FinBERT, LM signals, and event-study readiness.
-- Moving financial ticker strip with sample company sentiment and price movement.
-- Animated pipeline overview from transcript ingestion to predictive modeling.
-- Sentiment engine charts for FinBERT distribution and Loughran-McDonald categories.
-- FinBERT vs Loughran-McDonald comparison panel.
-- Transcript chunk sentiment timeline across prepared remarks, financial results, guidance, and Q&A.
-- Speaker-aware cards for CEO, CFO, analyst Q&A, and management tone.
-- Event-study / market reaction chart for abnormal return and CAR.
-- Predictive modeling status cards with clear insufficient-sample-size caveats.
-- Apple Q4 2020 demo signal card and GitHub CTA links.
+- Explicit `n=1` demonstration-dataset label and research caveats.
+- Verified FinBERT probability distribution and Loughran-McDonald polarity counts.
+- Real transcript topics, uncertainty ratio, token count, and exported keywords.
+- Transparent speaker-data unavailable state instead of invented CEO/CFO values.
+- Observed raw return, abnormal return, and CAR metrics from checked artifacts.
+- Guarded predictive-model status showing 25 features and zero trained models.
+- Architecture, provenance, methodology, loading, error, empty, and custom 404 views.
 
 ## Key Outputs
 
@@ -218,6 +235,7 @@ Verified generated outputs include:
 - `reports/tables/prediction_model_summary.csv`
 - `reports/figures/*.png`
 - `models/predictive_model_metadata.json`
+- `web/public/data/dashboard.json`
 
 ## Example Figures
 
@@ -230,19 +248,13 @@ Current generated figures live in `reports/figures/`:
 - `correlation_heatmap.png`
 - `model_agreement_summary.png`
 
-Dashboard screenshot placeholder:
-
-```text
-Add dashboard screenshot here: reports/screenshots/dashboard_overview.png
-Add EarningsLens web screenshot here: reports/screenshots/earningslens_web_dashboard.png
-```
-
 ## Current Limitations
 
 - The current real output contains one event: `AAPL_20201029`.
 - Correlations, regressions, and t-tests are skipped or descriptive because `n=1`.
 - Prediction modeling is pipeline-ready, but model training is skipped for fewer than 10 rows.
-- The EarningsLens web dashboard currently uses static/demo TypeScript data for recruiter-friendly product storytelling.
+- The checked speaker summary has aggregate chunk sentiment but no speaker or section labels; the web UI reports that limitation directly.
+- The deployed dashboard is a versioned snapshot and changes only after the exporter is rerun and the artifact is committed.
 - Reported charts should be read as artifact and workflow demonstrations, not investment conclusions.
 
 ## Future Scope
@@ -251,5 +263,5 @@ Add EarningsLens web screenshot here: reports/screenshots/earningslens_web_dashb
 - Add robust experiment tracking and model persistence after sample size grows.
 - Expand speaker-role attribution and Q&A-specific analysis.
 - Add confidence intervals and stronger event-study diagnostics with larger data.
-- Generate dashboard-ready JSON artifacts directly from the Python pipeline.
-- Deploy the Streamlit dashboard and EarningsLens web dashboard with reproducible artifact bundles.
+- Add automated artifact regeneration after reviewed offline pipeline runs.
+- Expand the deployed snapshot only when additional verified, non-sensitive records are available.
