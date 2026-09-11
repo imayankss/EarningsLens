@@ -263,5 +263,4 @@ Current generated figures live in `reports/figures/`:
 - Add robust experiment tracking and model persistence after sample size grows.
 - Expand speaker-role attribution and Q&A-specific analysis.
 - Add confidence intervals and stronger event-study diagnostics with larger data.
-- Add automated artifact regeneration after reviewed offline pipeline runs.
-- Expand the deployed snapshot only when additional verified, non-sensitive records are available.
+
