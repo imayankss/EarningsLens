@@ -4,7 +4,7 @@ A financial NLP research project that turns earnings-call transcripts into senti
 
 > Current dataset status: the real checked output contains **1 transcript/event** (`AAPL_20201029`). Statistical tests and ML training are intentionally guarded. Charts are descriptive snapshots, not inferential conclusions.
 
-
+## Dashboard Preview
 
 The project now includes **EarningsLens**, a premium dark fintech web dashboard built as a static-first presentation layer over the existing Python NLP pipeline.
 
